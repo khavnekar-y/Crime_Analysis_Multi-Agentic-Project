@@ -182,7 +182,7 @@ def test_pdf_processing(pdf_url=None):
 if __name__ == "__main__":
     # Example usage with different URLs
     test_urls = [
-        "https://resources.research.gov/common/attachment/Desktop/How_do_I_create_a_PDF-A_file.pdf",
+        "https://apnews.com/article/figure-skating-world-championships-plane-crash-5b1782d52c0a1addf651fe1dc812f401"
         # Add more test URLs here
     ]
     
