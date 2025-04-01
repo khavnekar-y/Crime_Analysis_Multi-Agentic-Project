@@ -889,21 +889,16 @@ def generate_crime_summary(user_query: dict) -> dict:
         }
 
 
-def generate_comprehensive_crime_summary(user_query: dict) -> dict:
+
+
+
+def compare_cities_safety(num_cities: int = 5) -> dict:
     """
-    Generating a detailed crime data summary from Snowflake.
-    
-    Args:
-        user_query (dict): Dictionary containing filters like:
-            {
-                "CITY": "Chicago",
-                "DATE_RANGE": ["2025-01-01", "2025-03-30"]
-            }
-    
-    Returns:
-        dict: Comprehensive summary results and status
+    Compare crime statistics between multiple cities using Snowflake data from 2020-2025.
+    Lower daily average means safer city.
     """
     try:
+        # Base query to get data for all cities with proper date range
         base_query = """
             SELECT 
                 CAST("DATE" as DATE) as "DATE",
@@ -911,141 +906,323 @@ def generate_comprehensive_crime_summary(user_query: dict) -> dict:
                 "VARIABLE",
                 CAST("VALUE" as INTEGER) as "VALUE"
             FROM CLEANED_CRIME_DATASET 
-            WHERE 1=1
+            WHERE "DATE" BETWEEN '2020-01-01' AND '2025-12-31'
+            AND "VARIABLE" LIKE 'Daily_count_of_incidents_%'
+            ORDER BY "DATE" DESC
         """
         
-        if "CITY" in user_query:
-            base_query += f" AND UPPER(\"CITY\") = UPPER('{user_query['CITY']}')"
-        if "DATE_RANGE" in user_query and len(user_query["DATE_RANGE"]) == 2:
-            start_date, end_date = user_query["DATE_RANGE"]
-            base_query += f" AND \"DATE\" BETWEEN '{start_date}' AND '{end_date}'"
-        
-        # Fetch and process data
+        print(f"Executing query: {base_query}")
         df = pd.read_sql(base_query, engine)
         df.columns = [col.strip('"').upper() for col in df.columns]
         
         if df.empty:
-            raise ValueError("No data returned for the specified filters. Please refine your query.")
-        
-        # Calculate comprehensive statistics
-        df['DATE'] = pd.to_datetime(df['DATE'])
-        total_incidents = df['VALUE'].sum()
-        crime_types = df.groupby('VARIABLE')['VALUE'].sum().sort_values(ascending=False)
-        top_crimes = crime_types.head(10)
-        dates_range = df['DATE']
-        num_days = len(dates_range.unique())
-        daily_avg = total_incidents / num_days if num_days > 0 else 0
-        
-        # Monthly trends
-        df['MONTH'] = df['DATE'].dt.strftime('%Y-%m')
-        monthly_trends = df.groupby('MONTH')['VALUE'].sum().to_dict()
-        
-        # Day of week analysis
-        df['DAY_OF_WEEK'] = df['DATE'].dt.day_name()
-        day_distribution = df.groupby('DAY_OF_WEEK')['VALUE'].sum().to_dict()
-        
-        # Time series analysis
-        trend = df.groupby('DATE')['VALUE'].sum().rolling(window=7).mean().mean()
-        
-        # Create context for detailed LLM analysis
-        context = f"""
-        Generating a comprehensive analysis of the following crime statistics for {user_query.get('CITY')}:
+            raise ValueError("No data returned from Snowflake")
 
-        Time Period Analysis:
-        - Date Range: {dates_range.min().strftime('%Y-%m-%d')} to {dates_range.max().strftime('%Y-%m-%d')}
-        - Total Days Analyzed: {num_days}
-        - Total Reported Incidents: {total_incidents:,}
-        - Daily Average: {daily_avg:.2f}
-
-        Crime Type Distribution:
-        {top_crimes.to_string()}
-
-        Monthly Incident Trends:
-        {pd.Series(monthly_trends).to_string()}
-
-        Day of Week Distribution:
-        {pd.Series(day_distribution).to_string()}
-
-        Additional Metrics:
-        - 7-Day Rolling Average: {trend:.2f}
-        - Unique Crime Categories: {len(crime_types)}
-
-        Provid a detailed analysis covering:
-        1. Executive Summary
-        2. Detailed Crime Pattern Analysis
-        3. Temporal Trends (Monthly and Daily Patterns)
-        4. Statistical Significance of Findings
-        5. Comparative Analysis with Historical Data
-        6. Public Safety Implications
-        7. Recommendations for Law Enforcement
-        8. Community Impact Assessment
-        9. Future Projections
-        10. Suggested Preventive Measures
-        """
+        # Calculate city-wise statistics
+        city_stats = []
+        for city in df['CITY'].unique():
+            city_data = df[df['CITY'] == city].copy()
+            
+            # Calculate total incidents and daily average
+            total_incidents = city_data['VALUE'].sum()
+            num_days = len(city_data['DATE'].unique())
+            daily_avg = total_incidents / num_days if num_days > 0 else 0
+            
+            # Get crime type distribution
+            crime_types = city_data.groupby('VARIABLE')['VALUE'].sum().sort_values(ascending=False)
+            most_common = crime_types.index[0].replace('Daily_count_of_incidents_', '').replace('_', ' ').title()
+            
+            # Calculate yearly trends
+            city_data['YEAR'] = pd.to_datetime(city_data['DATE']).dt.year
+            yearly_trend = city_data.groupby('YEAR')['VALUE'].sum()
+            
+            # Calculate trend percentage
+            if len(yearly_trend) > 1:
+                trend_pct = ((yearly_trend.iloc[-1] - yearly_trend.iloc[0]) / yearly_trend.iloc[0]) * 100
+            else:
+                trend_pct = 0
+            
+            city_stats.append({
+                'city': city,
+                'total_incidents': total_incidents,
+                'daily_average': daily_avg,
+                'most_common_crime': most_common,
+                'yearly_trend': yearly_trend.to_dict(),
+                'trend_percentage': trend_pct
+            })
         
-        # Get detailed analysis from LLM
-        response = llm.invoke(context)
-        analysis = response.content if hasattr(response, 'content') else str(response)
+        # Create DataFrame and sort by safety (lower daily average = safer)
+        city_stats_df = pd.DataFrame(city_stats)
+        city_stats_df = city_stats_df.sort_values('daily_average')
+        
+        # Add safety rankings (1 = safest)
+        city_stats_df['safety_rank'] = range(1, len(city_stats_df) + 1)
+        
+        # Calculate safety scores (100 = safest, 0 = least safe)
+        max_daily_avg = city_stats_df['daily_average'].max()
+        city_stats_df['safety_score'] = (1 - (city_stats_df['daily_average'] / max_daily_avg)) * 100
+        
+        # Add safety levels
+        city_stats_df['safety_level'] = city_stats_df['safety_score'].apply(lambda x: 
+            "Very Safe" if x >= 80 else
+            "Safe" if x >= 60 else
+            "Moderate" if x >= 40 else
+            "Less Safe" if x >= 20 else "Concerning"
+        )
         
         return {
-            "city": user_query.get('CITY'),
-            "date_range": f"{dates_range.min().strftime('%Y-%m-%d')} to {dates_range.max().strftime('%Y-%m-%d')}",
-            "total_incidents": total_incidents,
-            "daily_average": daily_avg,
-            "unique_crime_types": len(crime_types),
-            "top_crimes": top_crimes.to_dict(),
-            "monthly_trends": monthly_trends,
-            "day_distribution": day_distribution,
-            "trend_analysis": trend,
-            "detailed_analysis": analysis,
+            "city_stats": city_stats_df.to_dict('records'),
+            "total_cities": len(city_stats_df),
+            "date_range": "2020-01-01 to 2025-12-31",
             "status": "success"
         }
         
     except Exception as e:
-        print(f"Error generating comprehensive crime summary: {str(e)}")
+        print(f"Error comparing cities: {str(e)}")
         return {
             "error": str(e),
             "status": "failed"
         }
 
-if __name__ == "__main__":
-    user_query = {
-        "CITY": "Chicago",
-        "DATE_RANGE": ["2025-01-01", "2025-03-30"]
+def generate_city_safety_statistics(city_stats: list) -> dict:
+    """Generate statistical summary for all cities"""
+    stats = {
+        'avg_daily_incidents': np.mean([city['daily_average'] for city in city_stats]),
+        'total_incidents_by_year': {},
+        'year_over_year_changes': {},
+        'safest_year': None,
+        'most_dangerous_year': None
     }
     
-    result = generate_comprehensive_crime_summary(user_query)
+    # Calculate total incidents by year across all cities
+    years = range(2020, 2025)  # Only 2020-2024
+    for year in years:
+        yearly_total = sum(city['yearly_trend'].get(year, 0) for city in city_stats)
+        stats['total_incidents_by_year'][year] = yearly_total
+    
+    # Calculate year-over-year changes
+    for year in range(2021, 2025):
+        prev_year = stats['total_incidents_by_year'][year - 1]
+        curr_year = stats['total_incidents_by_year'][year]
+        pct_change = ((curr_year - prev_year) / prev_year) * 100
+        stats['year_over_year_changes'][year] = pct_change
+    
+    # Find safest and most dangerous years
+    min_year = min(stats['total_incidents_by_year'].items(), key=lambda x: x[1])
+    max_year = max(stats['total_incidents_by_year'].items(), key=lambda x: x[1])
+    stats['safest_year'] = min_year
+    stats['most_dangerous_year'] = max_year
+    
+    return stats
+
+if __name__ == "__main__":
+    result = compare_cities_safety()
+    
     if result["status"] == "success":
         print(f"""
-Comprehensive Crime Data Analysis Report
-=====================================
-City: {result['city']}
-Date Range: {result['date_range']}
+Multi-City Safety Comparison Report (2020-2024)
+============================================
+Analysis Period: 2020-01-01 to 2024-12-31
+Total Cities Analyzed: {result['total_cities']}
 
-Statistical Overview:
-------------------
-Total Incidents: {result['total_incidents']:,}
-Daily Average: {result['daily_average']:.2f}
-Unique Crime Categories: {result['unique_crime_types']}
-Days Analyzed: {len(result['monthly_trends'])}
+City Rankings (1 = Safest):
+------------------------""")
+        
+        # Sort cities by safety rank
+        cities = sorted(result['city_stats'], key=lambda x: x['safety_rank'])
+        
+        # Generate statistics
+        stats = generate_city_safety_statistics(cities)
+        
+        for city in cities:
+            trend_direction = "↑" if city['trend_percentage'] > 0 else "↓" if city['trend_percentage'] < 0 else "→"
+            
+            print(f"""
+{city['safety_rank']}. {city['city']}:
+   Safety Score: {city['safety_score']:.1f}%
+   Safety Level: {city['safety_level']}
+   Daily Average Incidents: {city['daily_average']:.2f}
+   Total Incidents (2020-2024): {sum(v for k,v in city['yearly_trend'].items() if k <= 2024):,}
+   Most Common Crime: {city['most_common_crime']}
+   4-Year Trend: {trend_direction} {abs(city['trend_percentage']):.1f}%
+   
+   Yearly Incident Totals:""")
+            
+            # Show only 2020-2024 data
+            for year in range(2020, 2025):
+                if year in city['yearly_trend']:
+                    print(f"   {year}: {city['yearly_trend'][year]:,}")
+            
+            print("-" * 50)
+        
+        # Print Statistical Summary
+        print(f"""
+Statistical Summary (2020-2024)
+============================
+Average Daily Incidents Across All Cities: {stats['avg_daily_incidents']:.2f}
 
-Top 10 Crime Types:
-----------------""")
-        for crime_type, count in result['top_crimes'].items():
-            print(f"- {crime_type}: {count:,}")
+Yearly Totals Across All Cities:
+----------------------------""")
+        for year, total in stats['total_incidents_by_year'].items():
+            print(f"{year}: {total:,}")
         
-        print("\nMonthly Incident Distribution:")
-        print("--------------------------")
-        for month, count in result['monthly_trends'].items():
-            print(f"- {month}: {count:,}")
+        print("\nYear-over-Year Changes:")
+        print("---------------------")
+        for year, change in stats['year_over_year_changes'].items():
+            print(f"{year}: {'↑' if change > 0 else '↓'} {abs(change):.1f}%")
         
-        print("\nDay of Week Analysis:")
-        print("------------------")
-        for day, count in result['day_distribution'].items():
-            print(f"- {day}: {count:,}")
-        
-        print("\nDetailed Analysis:")
-        print("----------------")
-        print(result['detailed_analysis'])
+        print(f"""
+Key Findings:
+-----------
+Safest Year: {stats['safest_year'][0]} ({stats['safest_year'][1]:,} incidents)
+Most Dangerous Year: {stats['most_dangerous_year'][0]} ({stats['most_dangerous_year'][1]:,} incidents)
+Safest City: {cities[0]['city']} (Score: {cities[0]['safety_score']:.1f}%)
+Most Concerning City: {cities[-1]['city']} (Score: {cities[-1]['safety_score']:.1f}%)
+""")
     else:
         print(f"Error: {result['error']}")
+
+def generate_table_summary(cities_data: dict) -> dict:
+    """
+    Generate a comparative summary of crime statistics across cities.
+    
+    Args:
+        cities_data (dict): Dictionary containing city statistics and rankings
+    
+    Returns:
+        dict: Comparative summary and analysis
+    """
+    try:
+        # Sort cities by safety ranking
+        cities = sorted(cities_data['city_stats'], key=lambda x: x['safety_rank'])
+        
+        # Calculate overall statistics
+        total_cities = len(cities)
+        avg_daily_incidents = np.mean([city['daily_average'] for city in cities])
+        
+        # Calculate yearly trends
+        yearly_totals = {}
+        for city in cities:
+            for year, incidents in city['yearly_trend'].items():
+                if 2020 <= year <= 2024:  # Only consider 2020-2024
+                    yearly_totals[year] = yearly_totals.get(year, 0) + incidents
+        
+        # Calculate year-over-year changes
+        yoy_changes = {}
+        for year in range(2021, 2025):
+            prev_year = yearly_totals[year - 1]
+            curr_year = yearly_totals[year]
+            pct_change = ((curr_year - prev_year) / prev_year) * 100
+            yoy_changes[year] = pct_change
+        
+        # Identify safest and most dangerous years
+        safest_year = min(yearly_totals.items(), key=lambda x: x[1])
+        most_dangerous_year = max(yearly_totals.items(), key=lambda x: x[1])
+        
+        # Create summary context for LLM
+        context = f"""
+        Crime Statistics Comparative Analysis (2020-2024)
+        
+        Overall Statistics:
+        - Total Cities Analyzed: {total_cities}
+        - Average Daily Incidents Across All Cities: {avg_daily_incidents:.2f}
+        - Safest City: {cities[0]['city']} (Score: {cities[0]['safety_score']:.1f}%)
+        - Most Concerning City: {cities[-1]['city']} (Score: {cities[-1]['safety_score']:.1f}%)
+        
+        Yearly Totals:
+        {chr(10).join([f"- {year}: {total:,} incidents" for year, total in yearly_totals.items()])}
+        
+        Year-over-Year Changes:
+        {chr(10).join([f"- {year}: {'↑' if change > 0 else '↓'} {abs(change):.1f}%" for year, change in yoy_changes.items()])}
+        
+        Key Time Periods:
+        - Safest Year: {safest_year[0]} ({safest_year[1]:,} incidents)
+        - Most Dangerous Year: {most_dangerous_year[0]} ({most_dangerous_year[1]:,} incidents)
+        
+        City Safety Rankings:
+        {chr(10).join([f"{city['safety_rank']}. {city['city']}: {city['safety_level']} ({city['safety_score']:.1f}%)" for city in cities])}
+        
+        Please provide a comprehensive analysis including:
+        1. Overall safety trends across cities
+        2. Notable patterns in yearly changes
+        3. Significant differences between cities
+        4. Key factors affecting safety scores
+        5. Recommendations for improving city safety
+        """
+        
+        # Get analysis from LLM
+        response = llm.invoke(context)
+        analysis = response.content if hasattr(response, 'content') else str(response)
+        
+        return {
+            "summary_stats": {
+                "total_cities": total_cities,
+                "avg_daily_incidents": avg_daily_incidents,
+                "yearly_totals": yearly_totals,
+                "yoy_changes": yoy_changes,
+                "safest_year": safest_year,
+                "most_dangerous_year": most_dangerous_year,
+                "safest_city": cities[0],
+                "most_concerning_city": cities[-1]
+            },
+            "analysis": analysis,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        print(f"Error generating comparative summary: {str(e)}")
+        return {
+            "error": str(e),
+            "status": "failed"
+        }
+
+# Example Usage
+if __name__ == "__main__":
+    # First get the city comparison data
+    cities_data = compare_cities_safety()
+    
+    if cities_data["status"] == "success":
+        # Generate comparative summary
+        result = generate_table_summary(cities_data)
+        
+        if result["status"] == "success":
+            stats = result["summary_stats"]
+            print(f"""
+Comparative Crime Analysis Report (2020-2024)
+=========================================
+Overview:
+--------
+Total Cities Analyzed: {stats['total_cities']}
+Average Daily Incidents: {stats['avg_daily_incidents']:.2f}
+
+Safety Rankings:
+-------------
+Most Safe: {stats['safest_city']['city']} (Score: {stats['safest_city']['safety_score']:.1f}%)
+Least Safe: {stats['most_concerning_city']['city']} (Score: {stats['most_concerning_city']['safety_score']:.1f}%)
+
+Temporal Trends:
+-------------
+Safest Year: {stats['safest_year'][0]} ({stats['safest_year'][1]:,} incidents)
+Most Dangerous Year: {stats['most_dangerous_year'][0]} ({stats['most_dangerous_year'][1]:,} incidents)
+
+Year-over-Year Changes:
+--------------------""")
+            for year, change in stats['yoy_changes'].items():
+                print(f"{year}: {'↑' if change > 0 else '↓'} {abs(change):.1f}%")
+            
+            print("\nDetailed Analysis:")
+            print("----------------")
+            print(result["analysis"])
+        else:
+            print(f"Error: {result['error']}")
+    else:
+        print(f"Error: {cities_data['error']}")
+
+# Get city comparison data
+cities_data = compare_cities_safety()
+
+# Generate comparative summary
+if cities_data["status"] == "success":
+    summary = generate_table_summary(cities_data)
+    if summary["status"] == "success":
+        print(summary["analysis"])

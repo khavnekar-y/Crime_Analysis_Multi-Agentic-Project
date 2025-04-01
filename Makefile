@@ -16,6 +16,9 @@ snowflake visuals:
 snowflake summary:
 	poetry run python .\Rag_Agents\snowflake_summary_agent.py
 
+comparision:
+	poetry run python .\Rag_Agents\Comparision_agent.py
+
 predict:
 	poetry run python .\Rag_Agents\Prediction_agent.py
 	
