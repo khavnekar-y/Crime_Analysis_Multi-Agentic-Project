@@ -282,11 +282,7 @@ description = "Timeout context manager for asyncio programs"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-<<<<<<< HEAD
-markers = "python_version == \"3.10\""
-=======
 markers = "python_version < \"3.11\""
->>>>>>> dev
 files = [
     {file = "async-timeout-4.0.3.tar.gz", hash = "sha256:4640d96be84d82d02ed59ea2b7105a0f7b33abe8703703cd0ab0bf87c427522f"},
     {file = "async_timeout-4.0.3-py3-none-any.whl", hash = "sha256:7405140ff1230c310e51dc27b3145b9092d659ce68ff733fb0cefe3ee42be028"},
@@ -404,8 +400,6 @@ tests = ["pytest (>=3.2.1,!=3.3.0)"]
 typecheck = ["mypy"]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "beautifulsoup4"
 version = "4.13.3"
 description = "Screen-scraping library"
@@ -429,7 +423,6 @@ html5lib = ["html5lib"]
 lxml = ["lxml"]
 
 [[package]]
->>>>>>> dev
 name = "blinker"
 version = "1.9.0"
 description = "Fast, simple object-to-object and broadcast signaling"
@@ -482,8 +475,6 @@ urllib3 = {version = ">=1.25.4,<2.2.0 || >2.2.0,<3", markers = "python_version >
 crt = ["awscrt (==0.23.8)"]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "bs4"
 version = "0.0.2"
 description = "Dummy package for Beautiful Soup (beautifulsoup4)"
@@ -499,7 +490,6 @@ files = [
 beautifulsoup4 = "*"
 
 [[package]]
->>>>>>> dev
 name = "build"
 version = "1.2.2.post1"
 description = "A simple, correct Python build frontend"
@@ -1162,8 +1152,6 @@ files = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "et-xmlfile"
 version = "2.0.0"
 description = "An implementation of lxml.xmlfile for the standard library"
@@ -1191,18 +1179,13 @@ files = [
 tests = ["pytest"]
 
 [[package]]
->>>>>>> dev
 name = "exceptiongroup"
 version = "1.2.2"
 description = "Backport of PEP 654 (exception groups)"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-<<<<<<< HEAD
-markers = "python_version == \"3.10\""
-=======
 markers = "python_version < \"3.11\""
->>>>>>> dev
 files = [
     {file = "exceptiongroup-1.2.2-py3-none-any.whl", hash = "sha256:3111b9d131c238bec2f8f516e123e14ba243563fb135d3fe885990585aa7795b"},
     {file = "exceptiongroup-1.2.2.tar.gz", hash = "sha256:47c2edf7c6738fafb49fd34290706d1a1a2f4d1c6df275526b62cbb4aa5393cc"},
@@ -1265,8 +1248,6 @@ testing = ["covdefaults (>=2.3)", "coverage (>=7.6.10)", "diff-cover (>=9.2.1)",
 typing = ["typing-extensions (>=4.12.2) ; python_version < \"3.11\""]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "filetype"
 version = "1.2.0"
 description = "Infer file type and MIME type of any file/buffer. No external dependencies."
@@ -1279,7 +1260,6 @@ files = [
 ]
 
 [[package]]
->>>>>>> dev
 name = "flatbuffers"
 version = "25.2.10"
 description = "The FlatBuffers serialization format for Python"
@@ -1366,8 +1346,6 @@ unicode = ["unicodedata2 (>=15.1.0) ; python_version <= \"3.12\""]
 woff = ["brotli (>=1.0.1) ; platform_python_implementation == \"CPython\"", "brotlicffi (>=0.8.0) ; platform_python_implementation != \"CPython\"", "zopfli (>=0.1.4)"]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "fpdf"
 version = "1.7.2"
 description = "Simple PDF generation for Python"
@@ -1379,7 +1357,6 @@ files = [
 ]
 
 [[package]]
->>>>>>> dev
 name = "frozenlist"
 version = "1.5.0"
 description = "A list-like structure which implements collections.abc.MutableSequence"
@@ -1483,16 +1460,6 @@ files = [
 
 [[package]]
 name = "fsspec"
-<<<<<<< HEAD
-version = "2025.3.0"
-description = "File-system specification"
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "fsspec-2025.3.0-py3-none-any.whl", hash = "sha256:efb87af3efa9103f94ca91a7f8cb7a4df91af9f74fc106c9c7ea0efd7277c1b3"},
-    {file = "fsspec-2025.3.0.tar.gz", hash = "sha256:a935fd1ea872591f2b5148907d103488fc523295e6c64b835cfad8c3eca44972"},
-=======
 version = "2025.3.2"
 description = "File-system specification"
 optional = false
@@ -1501,7 +1468,6 @@ groups = ["main"]
 files = [
     {file = "fsspec-2025.3.2-py3-none-any.whl", hash = "sha256:2daf8dc3d1dfa65b6aa37748d112773a7a08416f6c70d96b264c96476ecaf711"},
     {file = "fsspec-2025.3.2.tar.gz", hash = "sha256:e52c77ef398680bbd6a98c0e628fbc469491282981209907bbc8aea76a04fdc6"},
->>>>>>> dev
 ]
 
 [package.extras]
@@ -1582,8 +1548,6 @@ doc = ["sphinx (>=7.1.2,<7.2)", "sphinx-autodoc-typehints", "sphinx_rtd_theme"]
 test = ["coverage[toml]", "ddt (>=1.1.1,!=1.4.3)", "mock ; python_version < \"3.8\"", "mypy", "pre-commit", "pytest (>=7.3.1)", "pytest-cov", "pytest-instafail", "pytest-mock", "pytest-sugar", "typing-extensions ; python_version < \"3.11\""]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "google-ai-generativelanguage"
 version = "0.6.17"
 description = "Google Ai Generativelanguage API client library"
@@ -1641,7 +1605,6 @@ grpcgcp = ["grpcio-gcp (>=0.2.2,<1.0.dev0)"]
 grpcio-gcp = ["grpcio-gcp (>=0.2.2,<1.0.dev0)"]
 
 [[package]]
->>>>>>> dev
 name = "google-auth"
 version = "2.38.0"
 description = "Google Authentication Library"
@@ -1804,8 +1767,6 @@ docs = ["Sphinx", "furo"]
 test = ["objgraph", "psutil"]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "groq"
 version = "0.20.0"
 description = "The official Python library for the groq API"
@@ -1826,7 +1787,6 @@ sniffio = "*"
 typing-extensions = ">=4.10,<5"
 
 [[package]]
->>>>>>> dev
 name = "grpcio"
 version = "1.71.0"
 description = "HTTP/2-based RPC framework"
@@ -1891,8 +1851,6 @@ files = [
 protobuf = ["grpcio-tools (>=1.71.0)"]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "grpcio-status"
 version = "1.71.0"
 description = "Status proto mapping for gRPC"
@@ -1910,7 +1868,6 @@ grpcio = ">=1.71.0"
 protobuf = ">=5.26.1,<6.0dev"
 
 [[package]]
->>>>>>> dev
 name = "h11"
 version = "0.14.0"
 description = "A pure-Python, bring-your-own-I/O implementation of HTTP/1.1"
@@ -2039,23 +1996,14 @@ files = [
 
 [[package]]
 name = "huggingface-hub"
-<<<<<<< HEAD
-version = "0.29.3"
-=======
 version = "0.30.1"
->>>>>>> dev
 description = "Client library to download and publish models, datasets and other repos on the huggingface.co hub"
 optional = false
 python-versions = ">=3.8.0"
 groups = ["main"]
 files = [
-<<<<<<< HEAD
-    {file = "huggingface_hub-0.29.3-py3-none-any.whl", hash = "sha256:0b25710932ac649c08cdbefa6c6ccb8e88eef82927cacdb048efb726429453aa"},
-    {file = "huggingface_hub-0.29.3.tar.gz", hash = "sha256:64519a25716e0ba382ba2d3fb3ca082e7c7eb4a2fc634d200e8380006e0760e5"},
-=======
     {file = "huggingface_hub-0.30.1-py3-none-any.whl", hash = "sha256:0f6aa5ec5a4e68e5b9e45d556b4e5ea180c58f5a5ffa734e7f38c9d573028959"},
     {file = "huggingface_hub-0.30.1.tar.gz", hash = "sha256:f379e8b8d0791295602538856638460ae3cf679c7f304201eb80fb98c771950e"},
->>>>>>> dev
 ]
 
 [package.dependencies]
@@ -2073,10 +2021,7 @@ cli = ["InquirerPy (==0.3.4)"]
 dev = ["InquirerPy (==0.3.4)", "Jinja2", "Pillow", "aiohttp", "fastapi", "gradio (>=4.0.0)", "jedi", "libcst (==1.4.0)", "mypy (==1.5.1)", "numpy", "pytest (>=8.1.1,<8.2.2)", "pytest-asyncio", "pytest-cov", "pytest-env", "pytest-mock", "pytest-rerunfailures", "pytest-vcr", "pytest-xdist", "ruff (>=0.9.0)", "soundfile", "types-PyYAML", "types-requests", "types-simplejson", "types-toml", "types-tqdm", "types-urllib3", "typing-extensions (>=4.8.0)", "urllib3 (<2.0)"]
 fastai = ["fastai (>=2.4)", "fastcore (>=1.3.27)", "toml"]
 hf-transfer = ["hf-transfer (>=0.1.4)"]
-<<<<<<< HEAD
-=======
 hf-xet = ["hf-xet (>=0.1.4)"]
->>>>>>> dev
 inference = ["aiohttp"]
 quality = ["libcst (==1.4.0)", "mypy (==1.5.1)", "ruff (>=0.9.0)"]
 tensorflow = ["graphviz", "pydot", "tensorflow"]
@@ -2200,11 +2145,7 @@ description = "IPython: Productive Interactive Computing"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
-<<<<<<< HEAD
-markers = "python_version == \"3.10\""
-=======
 markers = "python_version < \"3.11\""
->>>>>>> dev
 files = [
     {file = "ipython-8.34.0-py3-none-any.whl", hash = "sha256:0419883fa46e0baa182c5d50ebb8d6b49df1889fdb70750ad6d8cfe678eda6e3"},
     {file = "ipython-8.34.0.tar.gz", hash = "sha256:c31d658e754673ecc6514583e7dda8069e47136eb62458816b7d1e6625948b5a"},
@@ -2663,32 +2604,19 @@ adal = ["adal (>=1.0.2)"]
 
 [[package]]
 name = "langchain"
-<<<<<<< HEAD
-version = "0.3.21"
-=======
 version = "0.3.22"
->>>>>>> dev
 description = "Building applications with LLMs through composability"
 optional = false
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 files = [
-<<<<<<< HEAD
-    {file = "langchain-0.3.21-py3-none-any.whl", hash = "sha256:c8bd2372440cc5d48cb50b2d532c2e24036124f1c467002ceb15bc7b86c92579"},
-    {file = "langchain-0.3.21.tar.gz", hash = "sha256:a10c81f8c450158af90bf37190298d996208cfd15dd3accc1c585f068473d619"},
-=======
     {file = "langchain-0.3.22-py3-none-any.whl", hash = "sha256:2e7f71a1b0280eb70af9c332c7580f6162a97fb9d5e3e87e9d579ad167f50129"},
     {file = "langchain-0.3.22.tar.gz", hash = "sha256:fd7781ef02cac6f074f9c6a902236482c61976e21da96ab577874d4e5396eeda"},
->>>>>>> dev
 ]
 
 [package.dependencies]
 async-timeout = {version = ">=4.0.0,<5.0.0", markers = "python_version < \"3.11\""}
-<<<<<<< HEAD
-langchain-core = ">=0.3.45,<1.0.0"
-=======
 langchain-core = ">=0.3.49,<1.0.0"
->>>>>>> dev
 langchain-text-splitters = ">=0.3.7,<1.0.0"
 langsmith = ">=0.1.17,<0.4"
 pydantic = ">=2.7.4,<3.0.0"
@@ -2782,8 +2710,6 @@ tenacity = ">=8.1.0,<8.4.0 || >8.4.0,<10.0.0"
 typing-extensions = ">=4.7"
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "langchain-google-genai"
 version = "2.1.2"
 description = "An integration package connecting Google's genai package and LangChain"
@@ -2818,7 +2744,6 @@ groq = ">=0.4.1,<1"
 langchain-core = ">=0.3.49,<1.0.0"
 
 [[package]]
->>>>>>> dev
 name = "langchain-openai"
 version = "0.3.11"
 description = "An integration package connecting OpenAI and LangChain"
@@ -2919,22 +2844,13 @@ orjson = ">=3.10.1"
 
 [[package]]
 name = "langsmith"
-<<<<<<< HEAD
-version = "0.3.19"
-=======
 version = "0.3.20"
->>>>>>> dev
 description = "Client library to connect to the LangSmith LLM Tracing and Evaluation Platform."
 optional = false
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 files = [
-<<<<<<< HEAD
-    {file = "langsmith-0.3.19-py3-none-any.whl", hash = "sha256:a306962ab53562c4094192f1da964309b48aac7898f82d1d421c3fb9c3f29367"},
-    {file = "langsmith-0.3.19.tar.gz", hash = "sha256:0133676689b5e1b879ed05a18e18570daf0dd05e0cefc397342656a58ebecbc5"},
-=======
     {file = "langsmith-0.3.20-py3-none-any.whl", hash = "sha256:48949e8697c75438cf1c36f83c8ac23cbb91e60161f960a3dc1df53cc441198d"},
->>>>>>> dev
 ]
 
 [package.dependencies]
@@ -3293,8 +3209,6 @@ files = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "mistralai"
 version = "1.6.0"
 description = "Python Client SDK for the Mistral AI API."
@@ -3317,7 +3231,6 @@ typing-inspection = ">=0.4.0"
 gcp = ["google-auth (>=2.27.0)", "requests (>=2.32.3)"]
 
 [[package]]
->>>>>>> dev
 name = "mmh3"
 version = "5.1.0"
 description = "Python extension for MurmurHash (MurmurHash3), a set of fast and robust hash functions."
@@ -3565,23 +3478,14 @@ files = [
 
 [[package]]
 name = "narwhals"
-<<<<<<< HEAD
-version = "1.32.0"
-=======
 version = "1.33.0"
->>>>>>> dev
 description = "Extremely lightweight compatibility layer between dataframe libraries"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-<<<<<<< HEAD
-    {file = "narwhals-1.32.0-py3-none-any.whl", hash = "sha256:8bdbf3f76155887412eea04b0b06303856ac1aa3d9e8bda5b5e54612855fa560"},
-    {file = "narwhals-1.32.0.tar.gz", hash = "sha256:bd0aa41434737adb4b26f8593f3559abc7d938730ece010fe727b58bc363580d"},
-=======
     {file = "narwhals-1.33.0-py3-none-any.whl", hash = "sha256:f653319112fd121a1f1c18a40cf70dada773cdacfd53e62c2aa0afae43c17129"},
     {file = "narwhals-1.33.0.tar.gz", hash = "sha256:6233d2457debf4b5fe4a1da54530c6fe2d84326f4a8e3bca35bbbff580a347cb"},
->>>>>>> dev
 ]
 
 [package.extras]
@@ -3967,23 +3871,14 @@ sympy = "*"
 
 [[package]]
 name = "openai"
-<<<<<<< HEAD
-version = "1.69.0"
-=======
 version = "1.70.0"
->>>>>>> dev
 description = "The official Python library for the openai API"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-<<<<<<< HEAD
-    {file = "openai-1.69.0-py3-none-any.whl", hash = "sha256:73c4b2ddfd050060f8d93c70367189bd891e70a5adb6d69c04c3571f4fea5627"},
-    {file = "openai-1.69.0.tar.gz", hash = "sha256:7b8a10a8ff77e1ae827e5e4c8480410af2070fb68bc973d6c994cf8218f1f98d"},
-=======
     {file = "openai-1.70.0-py3-none-any.whl", hash = "sha256:f6438d053fd8b2e05fd6bef70871e832d9bbdf55e119d0ac5b92726f1ae6f614"},
     {file = "openai-1.70.0.tar.gz", hash = "sha256:e52a8d54c3efeb08cf58539b5b21a5abef25368b5432965e4de88cdf4e091b2b"},
->>>>>>> dev
 ]
 
 [package.dependencies]
@@ -4002,8 +3897,6 @@ realtime = ["websockets (>=13,<15)"]
 voice-helpers = ["numpy (>=2.0.2)", "sounddevice (>=0.5.1)"]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "openpyxl"
 version = "3.1.5"
 description = "A Python library to read/write Excel 2010 xlsx/xlsm files"
@@ -4019,7 +3912,6 @@ files = [
 et-xmlfile = "*"
 
 [[package]]
->>>>>>> dev
 name = "opentelemetry-api"
 version = "1.31.1"
 description = "OpenTelemetry Python API"
@@ -4777,8 +4669,6 @@ files = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "proto-plus"
 version = "1.26.1"
 description = "Beautiful, Pythonic protocol buffers"
@@ -4797,7 +4687,6 @@ protobuf = ">=3.19.0,<7.0.0"
 testing = ["google-api-core (>=1.31.5)"]
 
 [[package]]
->>>>>>> dev
 name = "protobuf"
 version = "5.29.4"
 description = ""
@@ -5810,23 +5699,14 @@ requests = ">=2.0.1,<3.0.0"
 
 [[package]]
 name = "rich"
-<<<<<<< HEAD
-version = "13.9.4"
-=======
 version = "14.0.0"
->>>>>>> dev
 description = "Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal"
 optional = false
 python-versions = ">=3.8.0"
 groups = ["main"]
 files = [
-<<<<<<< HEAD
-    {file = "rich-13.9.4-py3-none-any.whl", hash = "sha256:6049d5e6ec054bf2779ab3358186963bac2ea89175919d699e378b99738c2a90"},
-    {file = "rich-13.9.4.tar.gz", hash = "sha256:439594978a49a09530cff7ebc4b5c7103ef57baf48d5ea3184f21d9a2befa098"},
-=======
     {file = "rich-14.0.0-py3-none-any.whl", hash = "sha256:1c9491e1951aac09caffd42f448ee3d04e58923ffe14993f6e83068dc395d7e0"},
     {file = "rich-14.0.0.tar.gz", hash = "sha256:82f1bc23a6a21ebca4ae0c45af9bdbc492ed20231dcb63f297d6d1021a9d5725"},
->>>>>>> dev
 ]
 
 [package.dependencies]
@@ -6380,8 +6260,6 @@ files = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "soupsieve"
 version = "2.6"
 description = "A modern CSS selector implementation for Beautiful Soup."
@@ -6394,7 +6272,6 @@ files = [
 ]
 
 [[package]]
->>>>>>> dev
 name = "sqlalchemy"
 version = "2.0.40"
 description = "Database Abstraction Library"
@@ -6582,8 +6459,6 @@ mpmath = ">=1.1.0,<1.4"
 dev = ["hypothesis (>=6.70.0)", "pytest (>=7.1.0)"]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "tavily-python"
 version = "0.5.3"
 description = "Python wrapper for the Tavily API"
@@ -6601,7 +6476,6 @@ requests = "*"
 tiktoken = ">=0.5.1"
 
 [[package]]
->>>>>>> dev
 name = "tenacity"
 version = "9.0.0"
 description = "Retry code until it succeeds"
@@ -6729,11 +6603,7 @@ description = "A lil' TOML parser"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-<<<<<<< HEAD
-markers = "python_version == \"3.10\""
-=======
 markers = "python_version < \"3.11\""
->>>>>>> dev
 files = [
     {file = "tomli-2.2.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:678e4fa69e4575eb77d103de3df8a895e1591b48e740211bd1067378c69e8249"},
     {file = "tomli-2.2.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:023aa114dd824ade0100497eb2318602af309e5a55595f76b626d6d9f3b7b0a6"},
@@ -7926,8 +7796,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-<<<<<<< HEAD
-content-hash = "9373c6863a4f593e7d1a487227f7b59220bbc1d5e037b5032e51cc9e9cf22167"
-=======
 content-hash = "d88e1844ab31c75147567262c80ed196b5601be45c563ea506d62279beae01ad"
->>>>>>> dev
