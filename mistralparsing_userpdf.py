@@ -54,7 +54,7 @@ def get_combined_markdown(ocr_response: OCRResponse) -> str:
 def process_pdf(pdf_path: Path, output_dir: Path = None):
     """Processes a single PDF file, embeds images into the markdown,
     and eliminates the need for a separate JSON file."""
-
+    pdf_path = Path(pdf_path) if not isinstance(pdf_path, Path) else pdf_path
     # PDF base name
     pdf_base = pdf_path.stem
     print(f"Processing {pdf_path.name} ...")
