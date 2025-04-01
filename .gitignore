@@ -50,11 +50,13 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+*.pdf
+*.xlsx
 
 # Translations
 *.mo
 *.pot
-
+crime_report.md
 # Django stuff:
 *.log
 local_settings.py
