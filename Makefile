@@ -10,8 +10,17 @@ update:
 
 
 
-snowflake:
-	poetry run python .\agents\snowflake_agent.py
+snowflake visuals:
+	poetry run python .\Rag_Agents\snowflake_agent.py
+
+snowflake summary:
+	poetry run python .\Rag_Agents\snowflake_summary_agent.py
+
+comparision:
+	poetry run python .\Rag_Agents\Comparision_agent.py
+
+predict:
+	poetry run python .\Rag_Agents\Prediction_agent.py
 	
 backend:
 	poetry run uvicorn main:app --host 0.0.0.0 --port 8080 --reload
@@ -32,7 +41,7 @@ ragagent:
 
 # Build commands
 fastapibuild:
-	docker build --platform=linux/amd64 -t gcr.io/gen-lang-client-0567410120/fastapi-agentic-app .
+	docker build --platform=linux/amd64 -t gcr.io/gen-lang-client-0567410120/fastapi-crimereport-app .
 
 streamlitbuild:
 	docker build --platform=linux/amd64 -t gcr.io/gen-lang-client-0567410120/streamlit-agentic-app .

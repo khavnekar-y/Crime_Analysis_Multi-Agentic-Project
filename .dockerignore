@@ -1,0 +1,57 @@
+# Development and version control
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+*.md
+!README.md
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data and output files
+*.log
+*.sqlite*
+*.db
+*.csv
+*.xlsx
+test_data/
+sample_data/
+
+# Environment
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Temporary files
+*.tmp
+*.bak
+tmp/
+.DS_Store
+
+# Large media files (unless needed)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.pdf
+*.zip
