@@ -10,7 +10,7 @@ This repository implements a multi-agent research assistant integrating:
 ---
 
 ## 📚 Crime Analysis Agentic Architecture Workflow
-![alt_text](architecture.png)
+![alt text](diagram-export-4-1-2025-12_02_12-AM.png)
 
 ---
 
