@@ -11,7 +11,7 @@ update:
 
 
 snowflake:
-	poetry run python .\agents\snowflake_agent.py
+	poetry run python .\Rag_Agents\snowflake_agent.py
 	
 backend:
 	poetry run uvicorn main:app --host 0.0.0.0 --port 8080 --reload
