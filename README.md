@@ -5,12 +5,14 @@ This repository implements a multi-agent research assistant integrating:
 
 - **RAG Agent:** Uses Pinecone (index: `crime-reports`) with metadata filtering (namespaces like `2023q1`, `2024q2`, etc.) to retrieve historical crime records.
 - **Web Search Agent:** Uses SerpAPI for real-time web search on crime trends and incidents.
-- **Snowflake Agent:** Queries structured crime statistics stored in Snowflake and generates summary charts.
+- **Snowflake Agent:** Queries structured crime statistics stored in Snowflake to generate summary and charts.
+- **ImageGenerator Agent:** Uses image generation capabilities to build “contextual” images.
+- **Comparision Agent:** Uses Snowflake data to compare data amongst different citites to compare the safety in each city against each other.
 
 ---
 
 ## 📚 Crime Analysis Agentic Architecture Workflow
-![alt_text](architecture.png)
+![alt text](diagram-export-4-1-2025-12_15_36-AM.png)
 
 ---
 
