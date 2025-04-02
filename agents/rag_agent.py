@@ -1,331 +1,249 @@
 import logging
 from langchain_core.tools import tool
-import boto3
-import json
-from sentence_transformers import CrossEncoder
-from typing import List, Dict, Any, Union
-from pinecone import Pinecone
-from PIL import Image
-import time
-import base64
-from io import BytesIO
-import re
 import os
-from sentence_transformers import SentenceTransformer
-# add imports for the agents
+from sentence_transformers import SentenceTransformer, CrossEncoder
+from typing import Dict, Any, Union, Optional
+from pinecone import Pinecone
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+import json
+import boto3
+
+# Initialize environment and configurations
 load_dotenv(override=True)
+
+SYSTEM_CONFIG = {
+    "CURRENT_UTC": "2025-04-02 06:21:03",
+    "CURRENT_USER": "user",
+    "MIN_YEAR": 1995,
+    "MAX_YEAR": 2018
+}
+
 # Initialize services
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=os.getenv("AWS_SERVER_PUBLIC_KEY"),
-    aws_secret_access_key=os.getenv("AWS_SERVER_SECRET_KEY"),
-    region_name=os.getenv("AWS_REGION")
-)
 encoder = SentenceTransformer('all-MiniLM-L6-v2')
 cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index = pc.Index(os.getenv("PINECONE_INDEX_NAME", "nvidia-reports"))
+index = pc.Index(os.getenv("PINECONE_INDEX_NAME", "crime-reports"))
+
+# Import the LLMSelector from your llmselection file
+from agents.llmselection import LLMSelector as llmselection
+
+class SearchCrimeDataInput(BaseModel):
+    tool_input: Dict[str, Any] = Field(..., description="The input parameters for the search")
 
 class RAGAgent:
-    def __init__(self, model_name):
-        """Initialize the RAG Agent with a language model."""
-        # Initialize the appropriate LLM based on the model name
-        if "claude" in model_name:
-            self.llm = ChatAnthropic(
-                model=model_name,
-                temperature=0,
-                anthropic_api_key=os.environ.get('ANTHROPIC_API_KEY')
-            )
-        elif "gemini" in model_name:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            self.llm = ChatGoogleGenerativeAI(
-                model=model_name,
-                temperature=0,
-                google_api_key=os.environ.get('GOOGLE_API_KEY')
-            )
-        elif "deepseek" in model_name:
-            from langchain_openai import ChatOpenAI
-            self.llm = ChatOpenAI(
-                model=model_name,
-                temperature=0,
-                api_key=os.environ.get('DEEP_SEEK_API_KEY')
-            )
-        elif "grok" in model_name:
-            from langchain_groq import ChatGroq
-            self.llm = ChatGroq(
-                model=model_name,
-                temperature=0,
-                api_key=os.environ.get('GROK_API_KEY')
-            )
-        else:
-            self.llm = ChatAnthropic(
-                model="claude-3-haiku-20240307",
-                temperature=0,
-                anthropic_api_key=os.environ.get('ANTHROPIC_API_KEY')
-            )
+    def __init__(self, model_name: str = "claude-3-haiku-20240307"):
+        # Initialize the LLM using the LLMSelector
+        self.initialize_agent(model_name)
         self.prompt = PromptTemplate.from_template("""
-        You are a financial analyst specialized in analyzing NVIDIA quarterly reports and financial data.
-        Based on the provided quarterly report excerpts, create a comprehensive analysis.
-
-        SEARCH RESULTS:
-        {context}
-
-        QUERY:
-        {query}
-
-        Please provide a detailed report following this structure:
-        1. Executive Summary
-           - Key findings related to the query
-           - Overall financial health indicators
-        
-        2. Financial Metrics Analysis
-           - Revenue and growth trends
-           - Segment performance
-           - Key financial ratios (if available)
-        
-        3. Business Highlights
-           - Major developments
-           - Product launches or technological advancements
-           - Strategic initiatives
-        
-        4. Market Position & Competition
-           - Market share information
-           - Competitive advantages
-           - Industry trends
-        
-        5. Future Outlook
-           - Company guidance
-           - Growth opportunities
-           - Potential challenges
-
-        Summarize the information in a professional, analytical tone, focusing on the most relevant data points 
-        from the provided quarterly reports.
-
-        ANALYSIS:
-    """)
+            You are a crime analysis expert. Based on the provided data, create a comprehensive analysis.
+            
+            SEARCH RESULTS:
+            {context}
+            
+            QUERY:
+            {query}
+            
+            Provide a detailed report with:
+            1. Executive Summary
+            2. Incident Details
+            3. Evidence & Leads
+            4. Context & Implications
+            5. Recommendations
+            
+            ANALYSIS:
+        """)
     
-    def process(self,query:str,context:str) -> str:
-        """Process the search results and provide insights."""
+    def initialize_agent(self, model_name: str):
+        """
+        Initialize the LLM by retrieving it from the LLMSelector.
+        This ensures that the correct model is used.
+        """
+        self.llm = llmselection.get_llm(model_name)
+    
+    def process(self, query: str, context: str) -> str:
+        """
+        Process the search results and return an analysis.
+        If no quality context is provided, a prompt to refine the search is returned.
+        """
         if not context or context.startswith("No results found"):
-            return "No relevant information found for your query.Try refining your search terms or exploring different time periods."
-        #Create a chain to process the search results
+            return "No relevant information found. Please refine your search."
         chain = self.prompt | self.llm | StrOutputParser()
-        # run the chain with the search results 
-        result = chain.invoke({
-            "query" : query,
-            "context" : context
-        })
-        return result
+        return chain.invoke({"query": query, "context": context})
 
-def clean_base64_images(text: Any) -> str:
-    """
-    Remove base64 encoded images from text for cleaner content.
-    
-    Args:
-        text: Text containing base64 encoded images
-    
-    Returns:
-        Cleaned text with base64 image data removed
-    """
-    # Check if text is a string
-    if not isinstance(text, str):
-        return str(text) if text is not None else ""
-        
-    if not text:
-        return ""
-    
-    # Pattern to find markdown image syntax with base64 data
-    pattern = r'(?:!\[.*?\]|\[Image.*?\])\(data:image\/[^;]+;base64,[^)]+\)'
-    
-    # Replace base64 images with a placeholder
-    cleaned_text = re.sub(pattern, '[IMAGE REMOVED]', text)
-    
-    return cleaned_text
-
-def get_content_from_s3(json_source: str) -> Dict:
-    """Retrieve content from S3 bucket"""
-    bucket = json_source.split('/')[2]
-    key = '/'.join(json_source.split('/')[3:])
+def get_chunk_from_s3(chunk_s3_path: str, chunk_index: int, s3_bucket: str) -> str:
+    """Retrieve specific chunk data from S3 with improved error handling."""
     try:
-        response = s3_client.get_object(Bucket=bucket, Key=key)
-        content = json.loads(response['Body'].read().decode('utf-8'))
-        return content
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv("AWS_SERVER_PUBLIC_KEY"),
+            aws_secret_access_key=os.getenv("AWS_SERVER_SECRET_KEY"),
+            region_name=os.getenv("AWS_REGION")
+        )
+        response = s3_client.get_object(
+            Bucket=s3_bucket,
+            Key=chunk_s3_path
+        )
+        chunks_data = json.loads(response['Body'].read().decode('utf-8'))
+        chunk_text = chunks_data.get(str(chunk_index), "")
+        if len(chunk_text.strip()) < 100 or chunk_text.strip().startswith('#'):
+            return ""
+        return chunk_text
     except Exception as e:
-        print(f"Error retrieving from S3: {e}")
-        return {}
+        logging.error(f"Error retrieving chunk from S3: {e}")
+        return ""
 
-def rerank_results(query: str, results: List[Dict], top_k: int = 5) -> List[Dict]:
-    """Rerank results using cross-encoder"""
+def rerank_results(query: str, results: list, top_k: int = 15) -> list:
+    """Re-rank results using the cross-encoder for higher relevance."""
     if not results:
         return []
-    
-    # Prepare pairs for reranking
-    pairs = [(query, result['metadata']['text_preview']) for result in results]
-    
-    # Get scores from cross-encoder
+    passages = []
+    for match in results:
+        metadata = match['metadata']
+        chunk_text = ""
+        if metadata.get('chunks_s3_path') and metadata.get('chunk_index'):
+            chunk_text = get_chunk_from_s3(
+                chunk_s3_path=metadata['chunks_s3_path'],
+                chunk_index=metadata['chunk_index'],
+                s3_bucket=metadata.get('s3_bucket', 'crime-records')
+            )
+        text = chunk_text if chunk_text else metadata.get('text_preview', '').strip()
+        if text:
+            passages.append((match, text))
+    if not passages:
+        return []
+    pairs = [[query, p[1]] for p in passages]
     scores = cross_encoder.predict(pairs)
-    
-    # Combine results with new scores
-    for result, score in zip(results, scores):
-        result['score'] = float(score)
-    
-    # Sort by new scores and return top_k
-    reranked_results = sorted(results, key=lambda x: x['score'], reverse=True)[:top_k]
-    return reranked_results
+    passage_scores = [(passages[i][0], score) for i, score in enumerate(scores)]
+    reranked_results = sorted(passage_scores, key=lambda x: x[1], reverse=True)
+    return [(item[0], float(item[1])) for item in reranked_results[:top_k]]
 
-def format_rag_contexts(matches: List[Dict]) -> str:
-    contexts = []
-    
-    for x in matches:
-        # Get full content from S3 if available
-        if 'json_source' in x['metadata']:
-            full_content = get_content_from_s3(x['metadata']['json_source'])
-            chunk_content = full_content.get(x['metadata']['chunk_id'], '')
-        else:
-            chunk_content = x['metadata'].get('text_preview', '')
-        
-        # Ensure chunk_content is a string and clean base64 images
-        if not isinstance(chunk_content, str):
-            chunk_content = str(chunk_content) if chunk_content is not None else ""
-        
-        # Clean base64 images from the content
-        cleaned_content = clean_base64_images(chunk_content)
-        
-        text = (
-            f"File Name: {x['metadata']['file_name']}\n"
-            f"Year: {x['metadata']['year']}\n"
-            f"Quarter: {x['metadata']['quarter']}\n"
-            f"Content: {cleaned_content}\n"
-            f"Source: {x['metadata']['source']}\n"
-            f"Relevance Score: {x['score']:.3f}\n"
-        )
-        contexts.append(text)
-    
-    return "\n---\n".join(contexts)
-
-@tool("search_all_namespaces")
-def search_all_namespaces(query: str, alpha: float = 0.5,model_name:str = "claude-3-haiku-20240307"):
-    """
-    Searches across all quarterly report namespaces using hybrid search.
-    """
-    print(f"\nSearching for query: {query}")
+def format_results(matches: list) -> str:
+    """Format search results with improved chunk data retrieval."""
     results = []
-    xq = encoder.encode([query])[0].tolist()
-    
-    namespaces = [f"{year}q{quarter}" for year in range(2023, 2025) 
-                 for quarter in range(1, 5)]
-    
-    print(f"Searching across namespaces: {namespaces}")
-    
-    for namespace in namespaces:
-        try:
-            xc = index.query(
-                vector=xq,
-                top_k=5,
-                include_metadata=True,
-                namespace=namespace,
-                alpha=alpha,
+    for match, score in matches:
+        metadata = match['metadata']
+        chunk_text = ""
+        if metadata.get('chunks_s3_path') and metadata.get('chunk_index'):
+            chunk_text = get_chunk_from_s3(
+                chunk_s3_path=metadata['chunks_s3_path'],
+                chunk_index=metadata['chunk_index'],
+                s3_bucket=metadata.get('s3_bucket', 'crime-records')
             )
-            if xc["matches"]:
-                results.extend(xc["matches"])
-            else:
-                logging.info(f"No results found in namespace {namespace}.")
-        except Exception as e:
-            logging.error(f"Error searching namespace {namespace}: {str(e)}")
+        description = chunk_text if chunk_text else metadata.get('text_preview', '').strip()
+        if len(description.strip()) < 50:
             continue
-    
-    print(f"\nTotal results found: {len(results)}")
-    
-    if results:
-        results = rerank_results(query, results)
-        formatted_contexts = format_rag_contexts(results)
-        # Initialize and use the agent to process results
-        agent = RAGAgent(model_name=model_name) 
-        processed_result = agent.process(query, formatted_contexts)
-        return{
-            "raw_contexts":formatted_contexts,
-            "insights": processed_result
-        }
-    else:
-        return "No results found across any namespace."
-    
-@tool("search_specific_quarter")
-def search_specific_quarter(input_dict: Dict) -> str:
-    """
-    Searches in specific quarterly report namespaces using hybrid search.
-    Args:
-        input_dict: Dictionary containing query and selected periods
-    """
-    if isinstance(input_dict, str) and "input_dict" in input_dict:
-        input_dict = json.loads(input_dict)
-    query = input_dict.get("query")
-    selected_periods = input_dict.get("selected_periods", ["2023q1"]) 
-    if not query:
-        return "Error: No query provided."
-    results = []
-    
-    # Encode query once for all searches
-    xq = encoder.encode([query])[0].tolist()
-    
-    for period in selected_periods:
-        try:
-            # Query each selected namespace
-            xc = index.query(
-                vector=xq,
-                top_k=5,
-                include_metadata=True,
-                namespace=period,
-                alpha=0.5
-            )
-            if xc["matches"]:
-                results.extend(xc["matches"])
-        except Exception as e:
-            logging.error(f"Error searching namespace {period}: {str(e)}")
-    
-    # Rerank combined results
-    if results:
-        results = rerank_results(query, results)
-        formatted_contexts = format_rag_contexts(results)
-        model_name = input_dict.get("model_name", "claude-3-haiku-20240307")
-        agent = RAGAgent(model_name=model_name)
-        process_results = agent.process(query,formatted_contexts)
+        results.append("\n".join([
+            f"Year: {metadata.get('year', 'Unknown')}",
+            f"Document ID: {metadata.get('document_id', 'Unknown')}",
+            f"Description: {description}",
+            f"Score: {score:.3f}\n"
+        ]))
+    return "\n---\n".join(results)
+
+@tool("search_crime_data")
+def search_crime_data(tool_input: Dict[str, Any]) -> Union[str, Dict]:
+    """Search crime report data with improved retrieval and ranking."""
+    try:
+        # Extract query parameters
+        query = tool_input.get("query")
+        search_mode = tool_input.get("search_mode", "all_years")
+        start_year = tool_input.get("start_year")
+        end_year = tool_input.get("end_year")
+        model_type = tool_input.get("model_type", "claude-3-haiku-20240307")
+        
+        if not query:
+            return "Error: Query is required"
+        
+        # Encode query for vector search
+        xq = encoder.encode([query])[0].tolist()
+        
+        # Determine year range based on search mode
+        years_range = range(
+            start_year or SYSTEM_CONFIG["MIN_YEAR"],
+            (end_year or SYSTEM_CONFIG["MAX_YEAR"]) + 1
+        ) if search_mode == "specific_range" else range(
+            SYSTEM_CONFIG["MIN_YEAR"], 
+            SYSTEM_CONFIG["MAX_YEAR"] + 1
+        )
+        
+        # Collect initial results from each year namespace
+        initial_results = []
+        for year in years_range:
+            try:
+                response = index.query(
+                    vector=xq,
+                    top_k=10,
+                    include_metadata=True,
+                    namespace=str(year),
+                    alpha=0.5
+                )
+                if response.get("matches"):
+                    initial_results.extend(response["matches"])
+            except Exception as e:
+                logging.error(f"Error searching year {year}: {e}")
+                continue
+        
+        if not initial_results:
+            return "No results found for the specified time period."
+        
+        # Re-rank results using the cross-encoder
+        reranked_results = rerank_results(query, initial_results, top_k=15)
+        
+        if not reranked_results:
+            return "No quality results found after filtering."
+            
+        # Format results using improved chunk retrieval
+        formatted_contexts = format_results(reranked_results)
+        
+        # Use RAG agent with the selected model to process the results
+        agent = RAGAgent(model_name=model_type)
+        insights = agent.process(query, formatted_contexts)
+        
         return {
             "raw_contexts": formatted_contexts,
-            "insights": process_results
+            "insights": insights,
+            "metadata": {
+                "query": query,
+                "search_mode": search_mode,
+                "time_range": f"{min(years_range)}-{max(years_range)}",
+                "timestamp": SYSTEM_CONFIG["CURRENT_UTC"],
+                "user": SYSTEM_CONFIG["CURRENT_USER"],
+                "result_count": len(reranked_results)
+            }
         }
-    return "No results found in selected quarters."
+    except Exception as e:
+        logging.error(f"Search failed: {e}")
+        return f"Error performing search: {str(e)}"
 
-    
+# Test the tool if run directly
 if __name__ == "__main__":
-    # Test search_all_namespaces with image extraction
-    query = "NVIDIA GPU architecture diagrams"
-    result = search_all_namespaces.invoke(query)
-    if isinstance(result, dict):
-        print("\n=== Search Results with ===")
-        print(result["raw_contexts"])
-        print("\n=== AI Agent Insights ===")
-        print(result["insights"])
-    else:
-        print(result["raw_contexts"])
-        
-    # Test searching across multiple periods
-    test_query = "NVIDIA revenue growth charts"
-    # Define multiple periods to search across
-    test_periods = ["2023q1", "2023q2", "2024q1"]
+    test_queries = [
+        {
+            "tool_input": {
+                "query": "Spike in vehicle theft incidents",
+                "search_mode": "specific_range",
+                "start_year": 2000,
+                "end_year": 2005
+            }
+        }
+    ]
     
-    input_dict = {
-        "query": test_query,
-        "selected_periods": test_periods
-    }
-    
-    # specific_result = search_specific_quarter.invoke(input_dict)
-    
-    # print("\n=== Multiple Quarter Results with Images ===")
-    # print(specific_result["raw_contexts"] if isinstance(specific_result, dict) else specific_result)
-    # print("\n=== AI Agent Insights ===")
-    # print(specific_result["insights"] if isinstance(specific_result, dict) else "")
+    for i, query in enumerate(test_queries, 1):
+        print(f"\nTest {i}: {query['tool_input']['search_mode']}")
+        try:
+            result = search_crime_data.invoke(query)
+            if isinstance(result, dict):
+                print(f"Success: Found {result['metadata']['result_count']} results")
+                filename = f"crime_report_{query['tool_input']['search_mode']}.json"
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, indent=2)
+                print(f"Results saved to {filename}")
+                print(f"Insights: {result['insights']}")
+            else:
+                print(f"Error: {result}")
+        except Exception as e:
+            print(f"Error processing query: {str(e)}")

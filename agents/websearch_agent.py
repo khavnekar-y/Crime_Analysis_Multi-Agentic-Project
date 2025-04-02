@@ -6,47 +6,118 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# 1. Tavily Configuration
-#    Set your token in an environment variable or hardcode for convenience.
+# 1. Constants and Configuration
 # ---------------------------------------------------------------------------
-TAVILY_TOKEN = os.getenv("TAVILY_API_KEY")  
+TAVILY_TOKEN = os.getenv("TAVILY_API_KEY")
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 TAVILY_EXTRACT_URL = "https://api.tavily.com/extract"
 
+# Default search configuration
+DEFAULT_CONFIG = {
+    "CURRENT_UTC": "2025-04-02 05:40:54",
+    "CURRENT_USER": "admin",
+    "DEFAULT_SEARCH_DEPTH": "advanced",
+    "DEFAULT_MAX_RESULTS": 5,
+    "DEFAULT_DAYS": 7,
+    "RELIABLE_DOMAINS": [
+        "nytimes.com", "cbsnews.com", "reuters.com", "apnews.com",
+        "bjs.gov", "fbi.gov", "police.gov", "justice.gov",
+        "crimereports.com", "abc.com", "nbcnews.com", "cnn.com"
+    ],
+    "EXCLUDED_DOMAINS": [
+        "twitter.com", "reddit.com", "facebook.com", "tiktok.com",
+        "instagram.com", "pinterest.com"
+    ]
+}
 
 # ---------------------------------------------------------------------------
-# 2. Tavily Search Function
-#    Uses POST /search to get relevant links and short snippet/answer
+# 2. Utility Functions
 # ---------------------------------------------------------------------------
-def tavily_search(query,
-                  topic="general",
-                  search_depth="advanced",
-                  max_results=3,
-                  days=7,
-                  include_domains=None,
-                  exclude_domains=None,
-                  location=None):
+def get_fallback_images():
+    """Return fallback crime-related image URLs"""
+    return [
+        "https://source.unsplash.com/featured/?police",
+        "https://source.unsplash.com/featured/?crime,scene",
+        "https://source.unsplash.com/featured/?police,car"
+    ]
+
+def format_date_range(start_year, end_year):
+    """Format date range for query enhancement"""
+    if start_year and end_year:
+        if start_year == end_year:
+            return f"in {start_year}"
+        return f"between {start_year} and {end_year}"
+    return ""
+
+# ---------------------------------------------------------------------------
+# 3. Core Search Functions
+# ---------------------------------------------------------------------------
+def tavily_search(
+    query,
+    selected_regions=None,  # Changed from location
+    start_year=None,
+    end_year=None,
+    search_mode="all_years",
+    topic="general",
+    search_depth=DEFAULT_CONFIG["DEFAULT_SEARCH_DEPTH"],
+    max_results=DEFAULT_CONFIG["DEFAULT_MAX_RESULTS"],
+    days=DEFAULT_CONFIG["DEFAULT_DAYS"],
+    include_domains=None,
+    exclude_domains=None
+):
     """
-    Perform a Tavily search and return search results JSON.
+    Enhanced Tavily search with support for historical crime data queries.
+    
+    Args:
+        query (str): Main search query
+        location (str, optional): Geographic location to focus search
+        start_year (int, optional): Start year for historical data
+        end_year (int, optional): End year for historical data
+        search_mode (str): Either "all_years" or "specific_range"
+        topic (str): Search topic category
+        search_depth (str): Search depth level
+        max_results (int): Maximum number of results to return
+        days (int): Number of recent days to search
+        include_domains (list): Specific domains to include
+        exclude_domains (list): Domains to exclude
     """
-    if location and location not in query:
-        enhanced_query = f"{query} in {location}"
-    else:
-        enhanced_query = query
+    # Build enhanced query
+    enhanced_query = query
+
+    # Add date range if specified
+    if search_mode == "specific_range" and start_year and end_year:
+        date_range = format_date_range(start_year, end_year)
+        enhanced_query = f"{enhanced_query} {date_range}"
+
+    # Add regions if specified
+    if selected_regions:
+        regions_str = " OR ".join(selected_regions)
+        enhanced_query = f"{enhanced_query} in ({regions_str})"
+
+
+    # Use default reliable domains if none specified
+    if not include_domains:
+        include_domains = DEFAULT_CONFIG["RELIABLE_DOMAINS"]
+
+    # Use default excluded domains if none specified
+    if not exclude_domains:
+        exclude_domains = DEFAULT_CONFIG["EXCLUDED_DOMAINS"]
+
     payload = {
         "query": enhanced_query,
-        "topic": topic,               # e.g., "news", "general", ...
-        "search_depth": search_depth, # "basic", "advanced"
+        "topic": topic,
+        "search_depth": search_depth,
         "chunks_per_source": 3,
         "max_results": max_results,
-        "days": days,                 # past N days for filtering
+        "days": days,
         "include_answer": True,
         "include_raw_content": False,
         "include_images": True,
         "include_image_descriptions": True,
-        "include_domains": include_domains or [],
-        "exclude_domains": exclude_domains or []
+        "include_domains": include_domains,
+        "exclude_domains": exclude_domains
     }
+
     headers = {
         "Authorization": f"Bearer {TAVILY_TOKEN}",
         "Content-Type": "application/json"
@@ -60,17 +131,16 @@ def tavily_search(query,
         print(f"[Error] Tavily search failed: {e}")
         return None
 
-
-# ---------------------------------------------------------------------------
-# 3. Tavily Extract Function
-#    Uses POST /extract to get detailed content from URLs
-# ---------------------------------------------------------------------------
-def tavily_extract(urls, extract_depth="basic", include_images=True):  # Default to True
+def tavily_extract(urls, extract_depth="basic", include_images=True):
     """
-    Extract content (text, optional images) from a list of URLs.
+    Extract detailed content from URLs with support for images.
+    
+    Args:
+        urls (str or list): Single URL or list of URLs to extract from
+        extract_depth (str): Depth of content extraction
+        include_images (bool): Whether to include images in extraction
     """
     if isinstance(urls, str):
-        # convert single URL to a list for consistency
         urls = [urls]
 
     payload = {
@@ -78,6 +148,7 @@ def tavily_extract(urls, extract_depth="basic", include_images=True):  # Default
         "extract_depth": extract_depth,
         "include_images": include_images
     }
+    
     headers = {
         "Authorization": f"Bearer {TAVILY_TOKEN}",
         "Content-Type": "application/json"
@@ -91,34 +162,27 @@ def tavily_extract(urls, extract_depth="basic", include_images=True):  # Default
         print(f"[Error] Tavily extract failed: {e}")
         return None
 
-# Simple function to get fallback images if API doesn't return any
-def get_fallback_images():
-    """Return fallback crime-related image URLs"""
-    return [
-        "https://source.unsplash.com/featured/?police",
-        "https://source.unsplash.com/featured/?crime,scene",
-        "https://source.unsplash.com/featured/?police,car"
-    ]
-
 # ---------------------------------------------------------------------------
-# 4. Generate Markdown
-#    Build a neat Markdown output from the search + extraction results.
+# 4. Report Generation
 # ---------------------------------------------------------------------------
 def build_markdown_report(query, search_result, extracts):
     """
-    Build a Markdown string from the Tavily search result and extraction data.
-    Returns JSON-formatted string with markdown_report and list_of_images.
+    Build a comprehensive markdown report with images and links.
+    
+    Returns:
+        str: JSON string containing markdown_report, images, and links
     """
-    # Track all images found in the report
     all_images = []
+    all_links = []
     
     if not search_result:
         return json.dumps({
-            "markdown_report": f"# Tavily Search Error\nNo valid search results for query: {query}",
-            "images": all_images
+            "markdown_report": f"# Search Error\nNo valid results for query: {query}",
+            "images": all_images,
+            "links": all_links
         })
 
-    # Convert extract response to a URL-keyed dictionary if it's not already
+    # Process extracts into URL-keyed dictionary
     extracts_by_url = {}
     if isinstance(extracts, list):
         for item in extracts:
@@ -127,155 +191,147 @@ def build_markdown_report(query, search_result, extracts):
     elif isinstance(extracts, dict):
         extracts_by_url = extracts
 
+    # Get main components from search results
     answer = search_result.get("answer", "No summary provided.")
     items = search_result.get("results", [])
     
-    # Extract search metadata
-    search_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    time_period = f"Past {search_result.get('days', 7)} days"
-
+    # Build markdown sections
     md_lines = []
-    md_lines.append(f"# Crime Report Search Results")
-    md_lines.append(f"**Query:** `{query}`")
-    md_lines.append(f"**Search Time:** {search_date}")
-    md_lines.append(f"**Time Period:** {time_period}\n")
     
-    # Add a fallback image at the top if needed
-    images_in_report = False
-    for item in items:
-        if "image_url" in item and item["image_url"]:
-            images_in_report = True
-            break
-            
+    # Header section
+    md_lines.extend([
+        f"# Crime Report Search Results",
+        f"**Query:** `{query}`",
+        f"**Search Time:** {DEFAULT_CONFIG['CURRENT_UTC']}",
+        f"**Generated by:** {DEFAULT_CONFIG['CURRENT_USER']}",
+        f"**Time Period:** Past {search_result.get('days', 7)} days\n"
+    ])
+
+    # Add fallback image if needed
+    images_in_report = any(
+        item.get("image_url") for item in items if isinstance(item, dict)
+    )
     if not images_in_report:
         fallback = get_fallback_images()
         if fallback:
             md_lines.append(f"![Crime Scene]({fallback[0]})\n")
             all_images.append(fallback[0])
-    
-    md_lines.append(f"## Summary / Answer\n{answer}\n")
-    md_lines.append("## Detailed Results\n")
 
+    # Summary section
+    md_lines.extend([
+        f"## Summary / Answer\n{answer}\n",
+        "## Detailed Results\n"
+    ])
+
+    # Process search items
     if not items:
         md_lines.append("*No search items found.*")
-        return json.dumps({
-            "markdown_report": "\n".join(md_lines),
-            "images": all_images
-        })
+    else:
+        for i, item in enumerate(items, start=1):
+            title = item.get("title", "Untitled")
+            url = item.get("url", "#")
+            snippet = item.get("content", "No snippet.")
+            
+            # Track link
+            all_links.append({
+                "title": title,
+                "url": url,
+                "source": item.get("source", "Unknown"),
+                "published_date": item.get("published_date", "Unknown")
+            })
+            
+            # Add item content
+            md_lines.append(f"**{i}.** [{title}]({url})")
+            
+            # Handle images
+            if "image_url" in item and item["image_url"]:
+                img_url = item["image_url"]
+                if img_url and img_url.startswith("http"):
+                    md_lines.append(f"\n![Image from {title}]({img_url})")
+                    all_images.append(img_url)
+            
+            md_lines.append(f"\n> {snippet}\n")
 
-    for i, item in enumerate(items, start=1):
-        title = item.get("title", "Untitled")
-        url = item.get("url", "#")
-        snippet = item.get("content", "No snippet.")
-        
-        md_lines.append(f"**{i}.** [{title}]({url})")
-        
-        # Add images if available in search results
-        if "image_url" in item and item["image_url"]:
-            img_url = item["image_url"]
-            if img_url and img_url.startswith("http"):  # Ensure URL is valid
-                md_lines.append(f"\n![Image from {title}]({img_url})")
-                all_images.append(img_url)
-        
-        md_lines.append(f"\n> {snippet}\n")
-
-        # If we have extracted text for this URL, add it
-        if url in extracts_by_url:
-            extracted_data = extracts_by_url[url]
-            if isinstance(extracted_data, dict):
-                # Add extracted text
-                text_content = extracted_data.get("text", "")
-                if len(text_content) > 500:
-                    text_content = text_content[:500] + "..."
-                md_lines.append(f"**Extracted Content**:\n\n{text_content}\n")
-                
-                # Add extracted images
-                if "images" in extracted_data and extracted_data["images"]:
-                    md_lines.append("**Images:**\n")
-                    for img in extracted_data["images"][:3]:  # Limit to first 3 images
-                        if isinstance(img, dict) and "url" in img:
-                            img_url = img["url"]
-                            if img_url and img_url.startswith("http"):  # Ensure URL is valid
-                                img_desc = img.get("description", "Image from article")
-                                md_lines.append(f"![{img_desc}]({img_url})\n")
-                                all_images.append(img_url)
+            # Add extracted content if available
+            if url in extracts_by_url:
+                extracted_data = extracts_by_url[url]
+                if isinstance(extracted_data, dict):
+                    # Text content
+                    text_content = extracted_data.get("text", "")
+                    if len(text_content) > 500:
+                        text_content = text_content[:500] + "..."
+                    md_lines.append(f"**Extracted Content**:\n\n{text_content}\n")
+                    
+                    # Images from extraction
+                    if "images" in extracted_data and extracted_data["images"]:
+                        md_lines.append("**Images:**\n")
+                        for img in extracted_data["images"][:3]:
+                            if isinstance(img, dict) and "url" in img:
+                                img_url = img["url"]
+                                if img_url and img_url.startswith("http"):
+                                    img_desc = img.get("description", "Image from article")
+                                    md_lines.append(f"![{img_desc}]({img_url})\n")
+                                    all_images.append(img_url)
 
     return json.dumps({
         "markdown_report": "\n".join(md_lines),
-        "images": all_images
+        "images": all_images,
+        "links": all_links,
+        "metadata": {
+            "query": query,
+            "timestamp": DEFAULT_CONFIG["CURRENT_UTC"],
+            "user": DEFAULT_CONFIG["CURRENT_USER"],
+            "result_count": len(items),
+            "image_count": len(all_images),
+            "link_count": len(all_links)
+        }
     })
 
 # ---------------------------------------------------------------------------
-# 5. Main Usage Example
+# 5. Main Function for Testing
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Example usage
-    location = "New York City"
-    query_str = f"Recent crime incidents and statistics"
+    # Test configuration
+    test_query = "Recent crime incidents and statistics"
+    test_config = {
+        "selected_regions": ["Chicago", "New York"],
+        "search_mode": "specific_range",
+        "start_year": 2000,
+        "end_year": 2005,
+        "topic": "news",
+        "max_results": 5
+    }
     
-    # List of news and government domains that typically have reliable crime data
-    reliable_domains = [
-        "nytimes.com", "cbsnews.com", "nypost.com", "ny1.com", 
-        "nyc.gov", "nypd.org", "abc7ny.com", "nbcnewyork.com",
-        "apnews.com", "reuters.com", "cnn.com"
-    ]
-
-    # 1) Do a Tavily search
+    # Execute search
     search_response = tavily_search(
-        query=query_str,
-        topic="news",
-        search_depth="advanced",
-        max_results=5,
-        days=3,
-        include_domains=reliable_domains,
-        exclude_domains=["twitter.com", "reddit.com", "facebook.com"],
-        location=location
+        query=test_query,
+        **test_config
     )
     
     if not search_response:
         print("Search failed. Exiting.")
         exit()
 
-    # 2) Extract content from the found URLs
-    urls = [item["url"] for item in search_response.get("results", []) if "url" in item]
-    extract_response = tavily_extract(urls=urls, extract_depth="basic", include_images=True)
+    # Extract content from URLs
+    urls = [item["url"] for item in search_response.get("results", []) 
+            if "url" in item]
+    extract_response = tavily_extract(urls=urls)
     
-    # Process the extract response and add images to search results
-    if extract_response and isinstance(extract_response, list):
-        # Create a URL-to-images mapping
-        for extract_item in extract_response:
-            if isinstance(extract_item, dict) and "url" in extract_item and "images" in extract_item:
-                url = extract_item["url"]
-                # Find the matching search result
-                for search_item in search_response.get("results", []):
-                    if search_item.get("url") == url:
-                        # If this search result has no image_url but extract has images, use the first image
-                        if not search_item.get("image_url") and extract_item["images"]:
-                            first_image = extract_item["images"][0]
-                            if isinstance(first_image, dict) and "url" in first_image:
-                                search_item["image_url"] = first_image["url"]
-                                print(f"Added image from extract to search result: {first_image['url']}")
-                        break
-        
-        # Create extracts_by_url dictionary as before
-        extracts_by_url = {}
-        for item in extract_response:
-            if isinstance(item, dict) and "url" in item:
-                extracts_by_url[item["url"]] = item
-    else:
-        extracts_by_url = {}
-
-    # 3) Build a neat Markdown report
-    # ...existing code...
-
-    result_json = build_markdown_report(query_str, search_response, extracts_by_url)
+    # Build report
+    result_json = build_markdown_report(test_query, search_response, extract_response)
     result_data = json.loads(result_json)
 
-    # 4) Write to file
-    report_file = "crime_report.md"
-    with open(report_file, "w", encoding="utf-8") as f:
+    # Save outputs
+    with open("crime_report.md", "w", encoding="utf-8") as f:
         f.write(result_data["markdown_report"])
 
-    print(f"\nReport generated and saved to: {report_file}")
-    print(f"Found {len(result_data['images'])} images in the report")
-    print("Open the report in a Markdown viewer to see the images properly.")
+    with open("crime_report_data.json", "w", encoding="utf-8") as f:
+        json.dump(result_data, f, indent=2)
+
+    # Print summary
+    print("\n=== Crime Report Generated ===")
+    print(f"- Report saved to: crime_report.md")
+    print(f"- Full data saved to: crime_report_data.json")
+    print(f"- Found {result_data['metadata']['image_count']} images")
+    print(f"- Found {result_data['metadata']['link_count']} links")
+    print("\nDone!")
