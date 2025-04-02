@@ -107,9 +107,16 @@ def get_fallback_images():
 def build_markdown_report(query, search_result, extracts):
     """
     Build a Markdown string from the Tavily search result and extraction data.
+    Returns JSON-formatted string with markdown_report and list_of_images.
     """
+    # Track all images found in the report
+    all_images = []
+    
     if not search_result:
-        return f"# Tavily Search Error\nNo valid search results for query: {query}"
+        return json.dumps({
+            "markdown_report": f"# Tavily Search Error\nNo valid search results for query: {query}",
+            "images": all_images
+        })
 
     # Convert extract response to a URL-keyed dictionary if it's not already
     extracts_by_url = {}
@@ -144,13 +151,17 @@ def build_markdown_report(query, search_result, extracts):
         fallback = get_fallback_images()
         if fallback:
             md_lines.append(f"![Crime Scene]({fallback[0]})\n")
+            all_images.append(fallback[0])
     
     md_lines.append(f"## Summary / Answer\n{answer}\n")
     md_lines.append("## Detailed Results\n")
 
     if not items:
         md_lines.append("*No search items found.*")
-        return "\n".join(md_lines)
+        return json.dumps({
+            "markdown_report": "\n".join(md_lines),
+            "images": all_images
+        })
 
     for i, item in enumerate(items, start=1):
         title = item.get("title", "Untitled")
@@ -164,6 +175,7 @@ def build_markdown_report(query, search_result, extracts):
             img_url = item["image_url"]
             if img_url and img_url.startswith("http"):  # Ensure URL is valid
                 md_lines.append(f"\n![Image from {title}]({img_url})")
+                all_images.append(img_url)
         
         md_lines.append(f"\n> {snippet}\n")
 
@@ -186,8 +198,12 @@ def build_markdown_report(query, search_result, extracts):
                             if img_url and img_url.startswith("http"):  # Ensure URL is valid
                                 img_desc = img.get("description", "Image from article")
                                 md_lines.append(f"![{img_desc}]({img_url})\n")
+                                all_images.append(img_url)
 
-    return "\n".join(md_lines)
+    return json.dumps({
+        "markdown_report": "\n".join(md_lines),
+        "images": all_images
+    })
 
 # ---------------------------------------------------------------------------
 # 5. Main Usage Example
@@ -250,12 +266,16 @@ if __name__ == "__main__":
         extracts_by_url = {}
 
     # 3) Build a neat Markdown report
-    md_report = build_markdown_report(query_str, search_response, extracts_by_url)
-    
+    # ...existing code...
+
+    result_json = build_markdown_report(query_str, search_response, extracts_by_url)
+    result_data = json.loads(result_json)
+
     # 4) Write to file
     report_file = "crime_report.md"
     with open(report_file, "w", encoding="utf-8") as f:
-        f.write(md_report)
-    
+        f.write(result_data["markdown_report"])
+
     print(f"\nReport generated and saved to: {report_file}")
+    print(f"Found {len(result_data['images'])} images in the report")
     print("Open the report in a Markdown viewer to see the images properly.")
