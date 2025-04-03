@@ -6,6 +6,8 @@ from sqlalchemy import create_engine
 from langchain.tools import Tool
 from langchain.agents import AgentType, initialize_agent
 from dotenv import load_dotenv
+from langchain.memory import ConversationBufferMemory
+from typing import Dict, Any, List, Tuple
 import warnings
 from io import BytesIO
 import base64
@@ -37,187 +39,251 @@ SYSTEM_CONFIG = {
 load_dotenv(override=True)
 
 class ComparisonAgent:
-    """Agent for comparing crime statistics across different cities and time periods."""
-    
-    def __init__(self, model_type=None):
-        """Initialize the comparison agent with database connection and LLM."""
-        self.engine = create_engine(
-            f"snowflake://{os.environ.get('SNOWFLAKE_USER')}:{os.environ.get('SNOWFLAKE_PASSWORD')}"
-            f"@{os.environ.get('SNOWFLAKE_ACCOUNT')}/{os.environ.get('SNOWFLAKE_DATABASE')}/"
-            f"{os.environ.get('SNOWFLAKE_SCHEMA')}?warehouse={os.environ.get('SNOWFLAKE_WAREHOUSE')}"
-        )
-        self.llm = llmselection.get_llm(model_type or "Claude 3 Haiku")
-        self.initialize_agent()
-
-    def initialize_agent(self):
-        """Initialize LangChain agent with tools."""
-        comparison_tool = Tool(
-            name="compare_crime_stats",
-            description="Compare crime statistics between cities and time periods",
-            func=self.compare_crime_stats
+    def __init__(self, model_type: str):
+        self.model_type = model_type
+        self.llm = llmselection.get_llm(model_type)
+        
+        # Initialize memory
+        self.memory = ConversationBufferMemory(
+            memory_key="comparison_history",
+            return_messages=True
         )
         
+        # Initialize tools
+        self.tools = [
+            Tool(
+                name="analyze_trends",
+                func=self._analyze_crime_trends,
+                description="Analyze crime trends across regions"
+            ),
+            Tool(
+                name="compare_statistics",
+                func=self._compare_regions,
+                description="Compare statistical data between regions"
+            )
+        ]
+        
+        # Initialize agent
         self.agent = initialize_agent(
-            tools=[comparison_tool],
+            tools=self.tools,
             llm=self.llm,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            handle_parsing_errors=True,
-            max_iterations=2,
-            early_stopping_method="generate"
+            agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
+            memory=self.memory,
+            verbose=True
+        )
+        
+        self.feedback_history = []
+
+    def _analyze_crime_trends(self, data: dict) -> str:
+        """Tool for analyzing crime trends in the data."""
+        try:
+            stats = data.get("statistics", {})
+            trends = stats.get("incident_analysis", {}).get("yearly_trends", {})
+            
+            return json.dumps({
+                "trend_analysis": trends,
+                "key_findings": self._extract_key_trends(trends)
+            })
+        except Exception as e:
+            return f"Error analyzing trends: {str(e)}"
+
+    def _compare_regions(self, regions: list, data: dict) -> str:
+        """Tool for comparing statistics between regions."""
+        try:
+            stats = data.get("statistics", {})
+            return json.dumps({
+                "regional_comparison": stats.get("regional_analysis", {}),
+                "key_differences": self._extract_regional_differences(stats, regions)
+            })
+        except Exception as e:
+            return f"Error comparing regions: {str(e)}"
+
+    def _analyze_temporal(self, region: str,
+                         snowflake_data: Dict,
+                         rag_data: Dict) -> str:
+        """Analyze temporal patterns for a single region."""
+        prompt = f"""
+        Analyze temporal crime patterns for {region}.
+        
+        Statistical Data:
+        {json.dumps(snowflake_data.get('statistics', {}), indent=2)[:1000]}...
+        
+        Historical Context:
+        {rag_data.get('insights', 'No historical context available')[:500]}...
+        
+        Provide:
+        1. Year-over-year changes
+        2. Seasonal patterns
+        3. Long-term trends
+        4. Key turning points
+        5. Future projections
+        """
+        
+        return self.agent.run(prompt)
+
+    def store_feedback(self, analysis_id: str, feedback: dict) -> None:
+        """Store feedback for improving future analyses."""
+        feedback_entry = {
+            "analysis_id": analysis_id,
+            "timestamp": datetime.now().isoformat(),
+            "feedback": feedback,
+            "model_type": self.model_type
+        }
+        self.feedback_history.append(feedback_entry)
+        
+        # Add feedback to conversation memory
+        self.memory.save_context(
+            {"input": "Analysis Feedback"},
+            {"output": f"Feedback received: {json.dumps(feedback)}"}
         )
 
-    def compare_crime_stats(self, cities: list, start_year: int = None, end_year: int = None) -> dict:
-        """Compare crime statistics between specified cities."""
+        # Update analyze method in ComparisonAgent class
+    def analyze(self, analysis_request: Dict, comparison_type: str) -> Dict:
+        """Analyze and compare crime data."""
         try:
-            # Build query
-            query = """
-            SELECT 
-                EXTRACT(YEAR FROM date) as year,
-                city,
-                incident,
-                SUM(value) as incident_count
-            FROM CLEAN_CRIME_DATASET
-            WHERE UPPER(city) IN ({})
-            {}
-            GROUP BY year, city, incident
-            ORDER BY year, city, incident
-            """.format(
-                ','.join([f"UPPER('{city}')" for city in cities]),
-                f"AND EXTRACT(YEAR FROM date) BETWEEN {start_year} AND {end_year}" 
-                if start_year and end_year else ""
+            regions = analysis_request["regions"]
+            snowflake_data = analysis_request["snowflake_data"]
+            rag_data = analysis_request.get("rag_data", {})
+            
+            # Get raw analysis
+            if comparison_type == "cross_region":
+                raw_result = self._analyze_cross_region(regions, snowflake_data, rag_data)
+            else:
+                raw_result = self._analyze_temporal(regions[0], snowflake_data, rag_data)
+                
+            # Structure the analysis
+            result = self._structure_analysis(raw_result, comparison_type)
+            result.update({
+                "regions": regions,
+                "type": comparison_type
+            })
+            
+            # Store in memory for future reference
+            self.memory.save_context(
+                {"input": f"Analysis for {', '.join(regions)}"},
+                {"output": json.dumps(result)}
             )
             
-            # Execute query
-            df = pd.read_sql(query, self.engine)
-            
-            if df.empty:
-                raise ValueError("No data found for the specified cities and time period.")
-            
-            # Generate comparison visualizations
-            viz_data = self.generate_comparison_visualizations(df)
-            
-            # Get LLM analysis
-            analysis = self.get_comparison_analysis(df)
-            
-            return {
-                "visualizations": viz_data,
-                "analysis": analysis,
-                "status": "success"
-            }
+            return result
             
         except Exception as e:
-            print(f"Error in compare_crime_stats: {str(e)}")
+            print(f"ComparisonAgent analysis error: {str(e)}")
             return {
                 "error": str(e),
                 "status": "failed"
             }
 
-    def generate_comparison_visualizations(self, df: pd.DataFrame) -> dict:
-        """Generate comparison visualizations."""
-        viz_paths = {}
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    def _analyze_cross_region(self, regions: List[str], 
+                            snowflake_data: Dict, 
+                            rag_data: Dict) -> str:
+        """Analyze cross-region comparisons."""
+        prompt = f"""
+        Compare crime patterns between {', '.join(regions)}.
         
+        Statistical Data:
+        {json.dumps(snowflake_data.get('statistics', {}), indent=2)[:1000]}...
+        
+        Historical Context:
+        {rag_data.get('insights', 'No historical context available')[:500]}...
+        
+        Provide:
+        1. Overall crime rate comparison
+        2. Specific crime type differences
+        3. Temporal trends comparison
+        4. Key factors explaining differences
+        5. Best practices recommendations
+        """
+        
+        return self.agent.run(prompt)
+
+    def _structure_analysis(self, response: str, comparison_type: str) -> dict:
+        """Structure the agent's response into a formatted analysis."""
         try:
-            # 1. Total Incidents by City Over Time
-            plt.figure(figsize=SYSTEM_CONFIG["FIGURE_SIZE"])
-            for city in df['city'].unique():
-                city_data = df[df['city'] == city].groupby('year')['incident_count'].sum()
-                plt.plot(city_data.index, city_data.values, marker='o', label=city)
+            # Parse the response into sections
+            sections = response.split('\n\n')
             
-            plt.title('Total Crime Incidents by City Over Time', fontsize=14)
-            plt.xlabel('Year', fontsize=12)
-            plt.ylabel('Number of Incidents', fontsize=12)
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            
-            total_incidents_path = f"total_incidents_comparison_{timestamp}.png"
-            plt.savefig(total_incidents_path, dpi=SYSTEM_CONFIG["DEFAULT_DPI"], bbox_inches='tight')
-            plt.close()
-            viz_paths['total_incidents'] = total_incidents_path
-
-            # 2. Incident Type Distribution by City
-            plt.figure(figsize=SYSTEM_CONFIG["FIGURE_SIZE"])
-            for i, city in enumerate(df['city'].unique()):
-                city_data = df[df['city'] == city].groupby('incident')['incident_count'].sum()
-                plt.bar([x + i*0.25 for x in range(len(city_data))], 
-                       city_data.values, 
-                       width=0.25, 
-                       label=city)
-            
-            plt.title('Incident Type Distribution by City', fontsize=14)
-            plt.xlabel('Incident Type', fontsize=12)
-            plt.ylabel('Total Number of Incidents', fontsize=12)
-            plt.xticks(range(len(df['incident'].unique())), 
-                      df['incident'].unique(), 
-                      rotation=45, 
-                      ha='right')
-            plt.legend()
-            plt.tight_layout()
-            
-            distribution_path = f"incident_distribution_comparison_{timestamp}.png"
-            plt.savefig(distribution_path, dpi=SYSTEM_CONFIG["DEFAULT_DPI"], bbox_inches='tight')
-            plt.close()
-            viz_paths['incident_distribution'] = distribution_path
-
-            return viz_paths
-            
+            return {
+                "analysis": response,
+                "insights": self._extract_insights(sections),
+                "recommendations": self._extract_recommendations(sections),
+                "metadata": {
+                    "comparison_type": comparison_type,
+                    "generated_at": datetime.now().isoformat(),
+                    "model_used": self.model_type
+                },
+                "status": "success"
+            }
         except Exception as e:
-            print(f"Error generating comparison visualizations: {str(e)}")
-            return {}
-
-    def get_comparison_analysis(self, df: pd.DataFrame) -> str:
-        """Get LLM analysis of comparison data."""
+            return {
+                "error": f"Error structuring analysis: {str(e)}",
+                "status": "failed"
+            }
+    def _extract_key_trends(self, trends: Dict) -> List[str]:
+        """Extract key trends from the data."""
+        key_findings = []
         try:
-            # Prepare context for analysis
-            cities = df['city'].unique()
-            years_range = f"{df['year'].min()} to {df['year'].max()}"
-            total_by_city = df.groupby('city')['incident_count'].sum()
-            
-            context = f"""
-            Analyze crime statistics comparison between {', '.join(cities)}:
-            
-            Time Period: {years_range}
-            
-            Total Incidents by City:
-            {total_by_city.to_string()}
-            
-            Top Incidents by City:
-            {df.groupby(['city', 'incident'])['incident_count'].sum().reset_index().sort_values(['city', 'incident_count'], ascending=[True, False]).to_string()}
-            
-            Please provide a comprehensive comparative analysis including:
-            1. Overall trends and patterns for each city
-            2. Notable differences between cities
-            3. Common patterns or correlations
-            4. Key insights and recommendations
-            5. Areas requiring attention
-            """
-            
-            # Get analysis from LLM
-            response = self.llm.invoke(context)
-            return response.content if hasattr(response, 'content') else str(response)
-            
+            if not trends:
+                return ["No trend data available"]
+                
+            # Analyze year-over-year changes
+            years = sorted(list(trends.keys()))
+            for i in range(1, len(years)):
+                prev_year = years[i-1]
+                curr_year = years[i]
+                change = trends[curr_year] - trends[prev_year]
+                pct_change = (change / trends[prev_year]) * 100
+                key_findings.append(
+                    f"{curr_year}: {'Increase' if change > 0 else 'Decrease'} of {abs(pct_change):.1f}%"
+                )
+                
+            return key_findings
         except Exception as e:
-            print(f"Error getting comparison analysis: {str(e)}")
-            return f"Error generating analysis: {str(e)}"
+            return [f"Error extracting trends: {str(e)}"]
 
-# Example usage
-if __name__ == "__main__":
-    # Initialize agent
-    agent = ComparisonAgent(model_type="Claude 3 Haiku")
-    
-    # Test comparison
-    result = agent.compare_crime_stats(
-        cities=["Chicago", "New York"],
-        start_year=2020,
-        end_year=2024
-    )
-    
-    if result["status"] == "success":
-        print("\nComparison Analysis:")
-        print("===================")
-        print(result["analysis"])
-        print("\nVisualization files:")
-        for viz_type, path in result["visualizations"].items():
-            print(f"- {viz_type}: {path}")
-    else:
-        print(f"Error: {result['error']}")
+    def _extract_regional_differences(self, stats: Dict, regions: List[str]) -> List[str]:
+        """Extract key differences between regions."""
+        differences = []
+        try:
+            if not stats or not regions:
+                return ["No regional data available"]
+                
+            regional_data = stats.get("regional_analysis", {})
+            for region in regions:
+                region_stats = regional_data.get(region, {})
+                differences.append(f"{region}:")
+                differences.extend([
+                    f"- Total incidents: {region_stats.get('total_incidents', 'N/A')}",
+                    f"- Top crime: {region_stats.get('top_crime', 'N/A')}",
+                    f"- YoY change: {region_stats.get('yoy_change', 'N/A')}%"
+                ])
+                
+            return differences
+        except Exception as e:
+            return [f"Error extracting regional differences: {str(e)}"]
+
+    def _extract_insights(self, sections: List[str]) -> List[str]:
+        """Extract key insights from analysis sections."""
+        insights = []
+        try:
+            for section in sections:
+                if ":" in section:
+                    title, content = section.split(":", 1)
+                    if any(keyword in title.lower() for keyword in ["finding", "insight", "trend", "pattern"]):
+                        insights.extend([line.strip() for line in content.split("\n") if line.strip()])
+            return insights if insights else ["No specific insights found"]
+        except Exception as e:
+            return [f"Error extracting insights: {str(e)}"]
+
+    def _extract_recommendations(self, sections: List[str]) -> List[str]:
+        """Extract recommendations from analysis sections."""
+        recommendations = []
+        try:
+            for section in sections:
+                if ":" in section:
+                    title, content = section.split(":", 1)
+                    if any(keyword in title.lower() for keyword in ["recommend", "suggest", "action", "improve"]):
+                        recommendations.extend([line.strip() for line in content.split("\n") if line.strip()])
+            return recommendations if recommendations else ["No specific recommendations found"]
+        except Exception as e:
+            return [f"Error extracting recommendations: {str(e)}"]

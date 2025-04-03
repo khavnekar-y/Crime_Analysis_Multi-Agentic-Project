@@ -2,7 +2,7 @@ import logging
 from langchain_core.tools import tool
 import os
 from sentence_transformers import SentenceTransformer, CrossEncoder
-from typing import Dict, Any, Union, Optional
+from typing import Dict, Any, Union, Optional, List
 from pinecone import Pinecone
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import PromptTemplate
@@ -64,13 +64,50 @@ class RAGAgent:
         """
         self.llm = llmselection.get_llm(model_name)
     
-    def process(self, query: str, context: str) -> str:
+    def process(self, query: str, search_mode: str = "all_years", 
+                start_year: Optional[int] = None, end_year: Optional[int] = None,
+                selected_regions: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Process the search results and return an analysis.
-        If no quality context is provided, a prompt to refine the search is returned.
+        Process a search query with parameters.
+        
+        Args:
+            query (str): The search query
+            search_mode (str): Either "all_years" or "specific_range"
+            start_year (Optional[int]): Start year for specific range
+            end_year (Optional[int]): End year for specific range
+            selected_regions (Optional[List[str]]): List of regions to analyze
+            
+        Returns:
+            Dict[str, Any]: Search results and analysis
         """
-        if not context or context.startswith("No results found"):
-            return "No relevant information found. Please refine your search."
+        # Create tool input for search
+        tool_input = {
+            "query": query,
+            "search_mode": search_mode,
+            "start_year": start_year,
+            "end_year": end_year,
+            "selected_regions": selected_regions
+        }
+        
+        # Use the search tool
+        search_results = search_crime_data({"tool_input": tool_input})
+        
+        # Process results with LLM
+        if isinstance(search_results, dict):
+            context = search_results.get("raw_contexts", "")
+            return {
+                "insights": self.process_with_llm(query, context),
+                "raw_results": search_results,
+                "status": "success"
+            }
+        else:
+            return {
+                "error": str(search_results),
+                "status": "failed"
+            }
+            
+    def process_with_llm(self, query: str, context: str) -> str:
+        """Process search results with LLM."""
         chain = self.prompt | self.llm | StrOutputParser()
         return chain.invoke({"query": query, "context": context})
 
