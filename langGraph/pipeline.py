@@ -159,34 +159,44 @@ def web_search_node(state: CrimeReportState) -> Dict:
         }}
 
 def rag_node(state: CrimeReportState) -> Dict:
+    """Execute RAG analysis for historical crime data."""
     try:
         print("\n📚 Retrieving historical crime data using RAG...")
-        rag_agent = RAGAgent()
         
-        # Remove filters parameter that's causing the error
+        # Get the model type from state
+        model_type = state.get("model_type")
+        if model_type:
+            print(f"RAG node using model: {model_type}")
+        
+        # Initialize the RAG agent with the user-selected model
+        rag_agent = RAGAgent(model_name=model_type)
+        
+        # Process the query with the RAG agent
         result = rag_agent.process(
             query=state["question"],
-            search_mode=state["search_mode"],
+            search_mode=state.get("search_mode", "all_years"),
             start_year=state.get("start_year"),
             end_year=state.get("end_year"),
-            selected_regions=state["selected_regions"]
+            selected_regions=state.get("selected_regions", []),
+            model_type=model_type  # Pass model_type explicitly
         )
         
+        print(f"✅ RAG analysis complete using {result.get('model_used', model_type)}")
         return {"rag_output": result}
         
     except Exception as e:
         print(f"❌ RAG analysis error: {str(e)}")
         traceback.print_exc()
-        return {"rag_output": {"error": str(e)}}
-    
+        return {"rag_output": {"error": str(e), "status": "failed"}}
+        
 def snowflake_node(state: CrimeReportState) -> Dict:
     """Execute Snowflake analysis for crime data visualizations."""
     try:
         print("\n📊 Analyzing crime data from Snowflake...")
         
-        # Initialize connections
+        # Initialize connections with the user-selected model
         from agents.snowflake_utils import initialize_connections
-        engine, llm = initialize_connections()
+        engine, llm = initialize_connections(model_type=state["model_type"])
         
         # Initialize the CrimeDataAnalyzer
         analyzer = CrimeDataAnalyzer(engine, llm)
@@ -215,8 +225,7 @@ def snowflake_node(state: CrimeReportState) -> Dict:
         print(f"❌ Snowflake analysis error: {str(e)}")
         traceback.print_exc()
         return {"snowflake_output": {"error": str(e), "status": "failed"}}
-
-
+    
 def contextual_image_node(state: CrimeReportState) -> Dict:
     """Generate contextual images based on crime data insights using Gemini native image generation."""
     try:
@@ -958,7 +967,7 @@ def judge_node(state: CrimeReportState) -> Dict:
         
         # Get or create judge agent
         if not hasattr(judge_node, 'agent'):
-            judge_node.agent = JudgeAgent()
+            judge_node.agent = JudgeAgent(model_type=state["model_type"])
         
         # Execute evaluation
         evaluation = judge_node.agent.evaluate(
@@ -1122,6 +1131,18 @@ def generate_report_cover(title: str, regions: List[str], time_period: str) -> s
 ###############################################################################
 def build_pipeline():
     """Build and compile the pipeline for crime report generation with parallel processing."""
+    if not hasattr(build_pipeline, 'llm_cache'):
+        build_pipeline.llm_cache = {}
+    
+    graph = StateGraph(CrimeReportState)
+    
+    def get_cached_llm(state):
+        """Get a cached LLM instance or create a new one."""
+        model_type = state.get("model_type")
+        if model_type not in build_pipeline.llm_cache:
+            build_pipeline.llm_cache[model_type] = llmselection.get_llm(model_type)
+        return build_pipeline.llm_cache[model_type]
+    
     graph = StateGraph(CrimeReportState)
     def parallel_data_gathering(state: CrimeReportState) -> Dict:
         """Execute web search, RAG, and snowflake analysis in parallel."""
@@ -1191,7 +1212,7 @@ def build_pipeline():
     
     return graph.compile()
 
-    
+
 ###############################################################################
 # Main Invocation
 ###############################################################################

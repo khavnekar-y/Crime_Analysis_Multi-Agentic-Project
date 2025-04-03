@@ -7,9 +7,9 @@ from typing import Dict, List
 from agents.llmselection import LLMSelector as llmselection
 
 class JudgeAgent:
-    def __init__(self, model_type: str = "Claude 3 Sonnet"):
+    def __init__(self, model_type: str = None):
         self.model_type = model_type
-        self.llm = llmselection.get_llm(model_type)
+        self.llm = llmselection.get_llm(self.model_type)
         
         # Initialize memory
         self.memory = ConversationBufferMemory(
@@ -42,7 +42,7 @@ class JudgeAgent:
         self.agent = initialize_agent(
             tools=self.tools,
             llm=self.llm,
-            agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             memory=self.memory,
             verbose=True
         )

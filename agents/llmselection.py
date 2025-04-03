@@ -18,7 +18,7 @@ class LLMSelector:
         "Grok": "grok-2-latest"                              # Correct Grok model name
     }
     
-    DEFAULT_MODEL = "Claude 3 Haiku"
+    DEFAULT_MODEL = "Gemini Pro"
 
     def get_response(llm: Any, prompt: str) -> str:
         """Get response from LLM and extract content consistently."""

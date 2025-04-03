@@ -483,7 +483,7 @@ class CrimeDataAnalyzer:
                 "selected_regions": request.selected_regions,
                 "search_mode": request.search_mode,
                 "year_range": f"{request.start_year}-{request.end_year}" if request.search_mode == "specific_range" else "all years",
-                "model_used": request.model_type or "claude-3-haiku-20240307"
+                "model_used": request.model_type
             },
             "statistics": {
                 "total_incidents": stats['total_incidents'],
@@ -500,7 +500,7 @@ class CrimeDataAnalyzer:
             "status": "success"
         }
 
-def initialize_connections():
+def initialize_connections(model_type=None):
     """Initialize database and LLM connections."""
     try:
         engine = create_engine(
@@ -510,7 +510,7 @@ def initialize_connections():
         )
         
         # Initialize with default model
-        llm = llmselection.get_llm("Gemini Pro")
+        llm = llmselection.get_llm(model_type)
         
         return engine, llm
     except Exception as e:
