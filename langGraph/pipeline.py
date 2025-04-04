@@ -288,8 +288,7 @@ def contextual_image_node(state: CrimeReportState) -> Dict:
                 img_response = requests.get(image_url)
                 if img_response.status_code == 200:
                     # Create timestamped filename
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    image_path = f"{prompt_data['prefix']}_{timestamp}.png"
+                    image_path = f"{prompt_data['prefix']}.png"
                     
                     # Save the image
                     img = Image.open(BytesIO(img_response.content))
@@ -417,7 +416,7 @@ def forecast_node(state: CrimeReportState) -> Dict:
         forecast_viz = generate_forecast_visualization(
             yearly_trends,
             state["selected_regions"][0],  
-            f"forecast_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            f"forecast_crime.png"
         )
         
         forecast_output = {
@@ -469,7 +468,7 @@ def safety_assessment_node(state: CrimeReportState) -> Dict:
         generate a comprehensive safety assessment for {', '.join(state['selected_regions'])}.
         
         Web Search Data:
-        {web_data}...
+        {web_data[:2000]}...
         
         Historical Insights:
         {rag_data[:2000]}
@@ -938,12 +937,18 @@ def judge_node(state: CrimeReportState) -> Dict:
         print(f"✅ Report evaluation complete - Overall score: {evaluation.get('overall_score', 'N/A')}/10")
         print(f"📝 Stored {len(judge_node.agent.feedback_history)} previous evaluations")
         
-        return {
+        evaluation_data = {
             "judge_feedback": evaluation,
             "quality_scores": evaluation.get("scores", {}),
             "improvement_suggestions": evaluation.get("improvement_suggestions", []),
             "feedback_history": judge_node.agent.feedback_history[-5:]  # Last 5 evaluations
         }
+        
+        # Include evaluation in the final report for storage
+        if "final_report" in state:
+            state["final_report"]["evaluation"] = evaluation_data
+        
+        return evaluation_data
         
     except Exception as e:
         print(f"❌ Report evaluation error: {str(e)}")
@@ -952,6 +957,10 @@ def judge_node(state: CrimeReportState) -> Dict:
             "judge_feedback": {"error": str(e)},
             "quality_scores": {"overall": 5}
         }
+        if "final_report" in state:
+            state["final_report"]["evaluation"] = error_data
+            
+        return error_data
     
 ###############################################################################
 # Helper Functions for Visualization
@@ -1148,7 +1157,7 @@ def generate_report_cover(title: str, regions: List[str], time_period: str) -> s
         draw.rectangle([(0, height-50), (width, height)], fill=(30, 50, 100))
         
         # Save the cover
-        output_path = f"report_cover_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = f"report_cover.png"
         cover.save(output_path)
         return output_path
         
@@ -1327,7 +1336,7 @@ if __name__ == "__main__":
         print(f"📊 Visualizations: {len(final_report.get('visualizations', []))}")
         
         # Save report to JSON file
-        output_filename = f"crime_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        output_filename = f"crime_report.json"
         with open(output_filename, "w", encoding="utf-8") as f:
             json.dump(final_report, f, indent=2)
         

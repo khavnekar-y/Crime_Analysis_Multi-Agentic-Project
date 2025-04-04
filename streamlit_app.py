@@ -2,12 +2,17 @@ import streamlit as st
 import requests
 import json
 import toml
-
+from streamlit_folium import st_folium
+import folium
+import os
+import time
+import base64
+from datetime import datetime
 # -------------------------------
 # 1) Page Config for Wide Layout
 # -------------------------------
 st.set_page_config(
-    page_title="NVIDIA Research Assistant",
+    page_title="Crime Analysis Assistant",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -17,121 +22,385 @@ st.set_page_config(
 # -------------------------------
 config = toml.load("config.toml")
 API_URL = config["fastapi_url"]
-QUERY_URL = f"{API_URL}/research_report"
+QUERY_URL = f"{API_URL}/generate_report"
+MODELS_URL = f"{API_URL}/available_models"
+
+# Add cities data after the API_URL definition
+cities = {
+    "New York": {"lat": 40.7128, "lon": -74.0060, "pop": 8419600, "crime_rate": 2.8},
+    "San Francisco": {"lat": 37.7749, "lon": -122.4194, "pop": 883305, "crime_rate": 6.1},
+    "Seattle": {"lat": 47.6062, "lon": -122.3321, "pop": 744955, "crime_rate": 5.2},
+    "Los Angeles": {"lat": 34.0522, "lon": -118.2437, "pop": 3980400, "crime_rate": 3.9},
+    "Houston": {"lat": 29.7604, "lon": -95.3698, "pop": 2328000, "crime_rate": 5.6},
+    "Chicago": {"lat": 41.8781, "lon": -87.6298, "pop": 2716000, "crime_rate": 4.7},
+}
 
 # -------------------------------
 # 3) Helper Functions
 # -------------------------------
-def display_financial_data(data):
-    """Display Snowflake financial metrics and chart."""
-    if not data:
-        st.info("No financial data available")
+# Replace the problematic part with this code
+def create_downloadable_report(report_data: dict) -> str:
+    """Create a formatted markdown report for downloading"""
+    try:
+        # If report_data is already a string (markdown text)
+        if isinstance(report_data, str):
+            return report_data
+            
+        # Otherwise, format it as markdown from the dictionary
+        timestamp = datetime.fromisoformat(report_data.get('timestamp', 
+                     datetime.now().isoformat())).strftime('%Y-%m-%d %H:%M:%S')
+        
+        report = f"""# Crime Analysis Report
+
+Generated: {timestamp}
+Question: {report_data.get('question', 'N/A')}
+Model: {report_data.get('model', 'N/A')}
+Regions: {', '.join(report_data.get('selected_regions', []))}
+
+## Quality Metrics
+Overall Score: {report_data.get('judge_score', 0)}/10
+
+### Detailed Metrics
+{chr(10).join([f'- {metric}: {score}/10' for metric, score in report_data.get('judge_feedback', {}).items()])}
+
+## Report Content
+{report_data.get('content', '')}
+"""
+        return report
+        
+    except Exception as e:
+        # Return a basic error report if something went wrong
+        return f"# Error Creating Report\n\nThere was an error formatting the report: {str(e)}"
+    
+def handle_combined_report():
+    st.title("Crime Analysis Assistant")
+    st.subheader("💬 Research History")
+
+    # # Show chat history
+    # with st.container():
+    #     for message in st.session_state.chat_history:
+    #         if message["role"] == "user":
+    #             periods_text = "All Years" if message.get("search_type") == "all_years" else f"{message.get('start_year', '')} - {message.get('end_year', '')}"
+    #             regions_text = ", ".join(message.get("selected_regions", []))
+    #             st.markdown(f"""
+    #                 <div class='user-message'>
+    #                     <div class='metadata'>📅 {periods_text}<br>🌎 Regions: {regions_text}<br>🤖 Model: {message.get("model", "")}</div>
+    #                     <div>🔍 {message['content']}</div>
+    #                 </div>
+    #             """, unsafe_allow_html=True)
+    #         else:
+    #             st.markdown(f"""
+    #                 <div class='assistant-message'>
+    #                     <div class='metadata'>🤖 Crime Analysis Assistant</div>
+    #                     <div>{message['content']}</div>
+    #                 </div>
+    #             """, unsafe_allow_html=True)
+
+    # Check if we have selected cities
+    if "selected_cities" not in st.session_state or not st.session_state["selected_cities"]:
+        st.warning("⚠️ No cities selected. Please go to the Map View and select at least one city.")
+        st.button("Go to Map View", on_click=nav_to, args=["Map View"])
         return
 
-    st.markdown("### NVIDIA Financial Metrics")
-    if "chart" in data:
-        st.image(
-            f"data:image/png;base64,{data['chart']}",
-            caption="NVIDIA Valuation Metrics",
-            use_column_width=True
-        )
-    if "metrics" in data:
-        st.markdown("#### Key Metrics")
-        if isinstance(data["metrics"], list):
-            st.dataframe(data["metrics"])
-        else:
-            st.write(data["metrics"])
+    # Input form
+    st.markdown("---")
+    with st.form("report_form", clear_on_submit=True):
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            question = st.text_input("Research Question", placeholder="What are the crime trends in New York?")
+        with col2:
+            submitted = st.form_submit_button("➤")
 
+    if submitted and question:
+        generate_report(question)
 
-def display_rag_results(data):
-    """Display results from the RAG Agent."""
-    if not data:
-        st.info("No document analysis available")
-        return
+def generate_report(question):
+    """Handle report generation and display"""
+    progress_placeholder = st.empty()
+    
+    with st.spinner("🔄 Generating report..."):
+        try:
+            # Prepare payload
+            payload = {
+                "question": question,
+                "search_mode": "all_years" if st.session_state.search_type == "All Years" else "specific_range",
+                "start_year": st.session_state.start_year,
+                "end_year": st.session_state.end_year,
+                "selected_regions": st.session_state["selected_cities"],
+                "model_type": st.session_state.selected_model
+            }
 
-    st.markdown("### Document Analysis Results")
-    st.markdown(data.get("result", "No results found"))
+            # Send request
+            response = requests.post(QUERY_URL, json=payload)
+            if response.status_code != 200:
+                st.error(f"❌ API Error: {response.status_code}")
+                return
 
-    if "sources" in data:
-        with st.expander("📚 Source Documents"):
-            for src in data["sources"]:
-                st.markdown(f"- {src}")
+            data = response.json()
+            report_id = data["report_id"]
+            status_url = data.get("status_url", f"/report_status/{report_id}")
 
+            # Show progress with actual status polling
+            with progress_placeholder:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                for i in range(60):  # Maximum 60 seconds wait time
+                    # Get current status
+                    status_response = requests.get(f"{API_URL}{status_url}")
+                    if status_response.status_code == 200:
+                        status_data = status_response.json()
+                        if status_data["status"] == "completed":
+                            progress_bar.progress(100)
+                            status_text.write("✅ Report completed!")
+                            break
+                        elif status_data["status"] == "failed":
+                            st.error(f"Report generation failed: {status_data.get('error', 'Unknown error')}")
+                            return
+                        else:
+                            # Still processing - calculate progress based on time
+                            progress_value = min(5 + i * 1.5, 95)  # Cap at 95%
+                            progress_bar.progress(int(progress_value))
+                            status_text.write(f"⏳ Processing report... ({int(progress_value)}%)")
+                    else:
+                        status_text.write(f"⚠️ Status check failed: {status_response.status_code}")
+                    
+                    time.sleep(1)
+                else:
+                    st.warning("⚠️ Report generation is taking longer than expected. Results will appear when ready.")
 
-def display_web_results(data):
-    """Display results from the Web Search Agent."""
-    if not data:
-        st.info("No web search results available")
-        return
+            # Get report content and judge metrics
+            report_response = requests.get(f"{API_URL}/report/{report_id}")
+            if report_response.status_code == 200:
+                try:
+                    # First try to parse as JSON (in case API response format changes)
+                    report_data = report_response.json()
+                    content = report_data.get("content", "")
+                    judge_score = report_data.get("judge_score", 0)
+                    judge_feedback = report_data.get("judge_feedback", {})
+                except json.JSONDecodeError:
+                    # Handle as plain text/markdown if not JSON
+                    content = report_response.text
+                    
+                    # Get judge metrics from status endpoint instead
+                    status_response = requests.get(f"{API_URL}/report_status/{report_id}")
+                    if status_response.status_code == 200:
+                        status_data = status_response.json()
+                        judge_score = status_data.get("judge_score", 0)
+                        judge_feedback = status_data.get("judge_feedback", {})
+                        
+                        # Try to get evaluation data if available
+                        if "evaluation" in status_data:
+                            judge_feedback = status_data["evaluation"].get("judge_feedback", judge_feedback)
+                    else:
+                        judge_score = 0
+                        judge_feedback = {}
+                
+                # Store report in session state
+                st.session_state.reports[report_id] = {
+                    "content": content,
+                    "judge_score": judge_score,
+                    "judge_feedback": judge_feedback,
+                    "timestamp": datetime.now().isoformat(),
+                    "question": question,
+                    "selected_regions": st.session_state["selected_cities"],
+                    "model": st.session_state.selected_model
+                }
+                
+                # Process markdown sections
+                sections = content.split('\n')
+                current_text = []
+                
+                for line in sections:
+                    if line.startswith('!['):
+                        # If we have accumulated text, display it
+                        if current_text:
+                            st.markdown('\n'.join(current_text))
+                            current_text = []
+                        
+                        # Handle image
+                        try:
+                            img_path = line.split('](')[1].split(')')[0]
+                            if img_path.startswith('./'):
+                                img_path = img_path[2:]
+                            if os.path.exists(img_path):
+                                st.image(img_path, use_column_width=True)
+                            else:
+                                st.warning(f"Image not found: {img_path}")
+                        except Exception as img_error:
+                            st.error(f"Error displaying image: {img_error}")
+                    else:
+                        current_text.append(line)
+                
+                # Display any remaining text
+                if current_text:
+                    st.markdown('\n'.join(current_text))
+                
+                # Display metrics and provide download in a cleaner layout
+                col1, col2, col3 = st.columns([2, 2, 1])
+                
+                with col1:
+                    with st.expander("📊 Quality Metrics", expanded=True):
+                        st.markdown(f"**Overall Score**: {judge_score:.1f}/10")
+                        scores = judge_feedback.get("scores", {})
+                        if not scores and isinstance(judge_feedback, dict):
+                            # Try other possible key structures
+                            scores = {k: v for k, v in judge_feedback.items() 
+                                     if isinstance(v, (int, float)) and k != "overall_score"}
+                        
+                        for metric, score in scores.items():
+                            st.markdown(f"- **{metric.capitalize()}**: {score:.1f}/10")
+                
+                with col2:
+                    with st.expander("💡 Improvement Suggestions", expanded=True):
+                        suggestions = judge_feedback.get("improvement_suggestions", [])
+                        if suggestions:
+                            for suggestion in suggestions:
+                                st.markdown(f"- {suggestion}")
+                        else:
+                            st.markdown("No specific suggestions provided.")
+                
+                with col3:
+                    # Use the raw markdown content directly for download
+                    try:
+                        # Get the report content directly from the API
+                        download_response = requests.get(f"{API_URL}/report/{report_id}")
+                        
+                        if download_response.status_code == 200:
+                            # Use the raw response text
+                            report_md = download_response.text
+                        else:
+                            # Fallback to the local version
+                            report_md = create_downloadable_report(st.session_state.reports[report_id])
+                        
+                        # Use download button
+                        st.download_button(
+                            label="📥 Download",
+                            data=report_md,
+                            file_name=f"crime_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                            mime="text/markdown"
+                        )
+                    except Exception as e:
+                        st.error(f"Error preparing download: {str(e)}")
+                
+                # Remove redundant "View Detailed Quality Metrics" button
+                # The metrics are already shown in the expander above
+                st.write("") # Add some spacing
+                st.info("💡 View more detailed metrics in the Judge Metrics tab")
 
-    st.markdown("### Web Search Results")
-    st.markdown(data)
+            else:
+                st.error(f"❌ Failed to retrieve report: {report_response.status_code}")
+                
+        except Exception as e:
+            st.error(f"❌ Error generating report: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
+        finally:
+            # Clean up progress display
+            progress_placeholder.empty()
+
+def create_download_link(report_id):
+    """Create a download link for base64-encoded markdown report"""
+    download_url = f"{API_URL}/download_report/{report_id}"
+    return f'<a href="{download_url}" target="_blank" download="crime_report_{report_id}.md">Download Report with Images</a>'
+
+# Add this helper function in the Helper Functions section
+def poll_report_status(report_id: str, status_url: str) -> dict:
+    """Simple polling with fixed delay"""
+    max_retries = 30  # 30 seconds max wait
+    
+    for _ in range(max_retries):
+        try:
+            response = requests.get(f"{API_URL}{status_url}")
+            if response.status_code == 200:
+                data = response.json()
+                if data["status"] in ["completed", "failed"]:
+                    return data
+            time.sleep(1)  # Simple 1-second delay between checks
+        except Exception as e:
+            st.error(f"Error checking status: {str(e)}")
+            time.sleep(1)
+    
+    return {"status": "timeout"}
 
 # -------------------------------
 # 4) Sidebar Configuration
 # -------------------------------
-st.sidebar.title("NVIDIA Research Assistant")
+st.sidebar.title("Crime Analysis Assistant")
 st.sidebar.markdown("### Search Configuration")
 
 search_type = st.sidebar.radio(
     "Select Search Type",
-    ["All Quarters", "Specific Quarter"],
+    ["All Years", "Specific Year Range"],
     key="search_type"
 )
 
-# Keep user’s selected periods in session
-if "selected_periods" not in st.session_state:
-    st.session_state.selected_periods = ["2023q1"]
 
-if search_type == "Specific Quarter":
-    all_periods = [f"{y}q{q}" for y in range(2020, 2026) for q in range(1, 5)]
-    # 1) Filter out "all" from the default to avoid the Streamlit error
-    default_selected = [
-        p for p in st.session_state.selected_periods
-        if p in all_periods
-    ]
-    if not default_selected:
-        default_selected = ["2023q1"]  # Some safe default
 
-    selected_periods = st.sidebar.multiselect(
-        "Select Period(s)",
-        options=all_periods,
-        default=default_selected,  # Use the filtered list
-        key="period_select"
+if search_type == "Specific Year Range":
+    # Replace multiselect with a year range slider
+    year_range = st.sidebar.slider(
+        "Select Year Range",
+        min_value=1995,
+        max_value=2025,
+        value=(2020, 2025),  # Default range
+        step=1,
+        key="year_slider"
     )
-
-    if not selected_periods:
-        selected_periods = ["2023q1"]
+    
+    # Convert selected years to quarters
+    selected_periods = []
+    for year in range(year_range[0], year_range[1] + 1):
+        for quarter in range(1, 5):
+            selected_periods.append(f"{year}q{quarter}")
+    
     st.session_state.selected_periods = selected_periods
+    st.session_state.start_year = year_range[0]
+    st.session_state.end_year = year_range[1]
 
 else:
     selected_periods = ["all"]
     st.session_state.selected_periods = selected_periods
+    st.session_state.start_year = None
+    st.session_state.end_year = None
 
-
+# -------------------------------
+# LLM Model Configuration
+# -------------------------------
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Agent Configuration")
+st.sidebar.markdown("### Model Configuration")
 
-if "selected_agents" not in st.session_state:
-    st.session_state.selected_agents = ["RAG Agent"]
+# Get available models from API
 
-available_agents = ["RAG Agent", "Web Search Agent", "Snowflake Agent"]
-selected_agents = st.sidebar.multiselect(
-    "Select AI Agents (at least one required)",
-    options=available_agents,
-    default=st.session_state.selected_agents,
-    key="agent_select_unique"
+response = requests.get(MODELS_URL)
+if response.status_code == 200:
+    model_data = response.json()
+    available_models = {model: model for model in model_data.get("models", [])}
+# Model selection - simplified to avoid unnecessary state changes
+if "selected_model" not in st.session_state:
+    st.session_state.selected_model = list(available_models.keys())[0]
+
+# Create a selection box for model selection without explicit rerun
+model_display_name = st.sidebar.selectbox(
+    "Select Model",
+    options=list(available_models.keys()),
+    index=list(available_models.keys()).index(st.session_state.selected_model)
+        if st.session_state.selected_model in available_models.keys() else 0,
+    key="model_select",
+    on_change=lambda: setattr(st.session_state, "selected_model", st.session_state.model_select)
 )
+# Add model description based on selection
+model_descriptions = {
+    "Claude 3 Haiku": "Fast, compact model with strong reasoning capabilities (Anthropic)",
+    "Claude 3 Sonnet": "Balanced performance with enhanced reasoning (Anthropic)", 
+    "Gemini Pro": "Google's advanced model with strong coding abilities (Google)",
+    "DeepSeek": "Specialized for code generation and technical tasks (DeepSeek)",
+    "Grok": "Conversational model focused on insightful responses (xAI)"
+}
 
-# Validate agent selection
-if not selected_agents:
-    st.sidebar.warning("⚠️ At least one agent is required")
-    selected_agents = ["RAG Agent"]
-st.session_state.selected_agents = selected_agents.copy()
-
-if st.sidebar.button("Apply Agent Selection", type="primary", use_container_width=True, key="apply_agents_unique"):
-    st.session_state.selected_agents = selected_agents.copy()
-    st.sidebar.success("✅ Agent selection updated!")
+with st.sidebar.expander("📝 Model Info"):
+    st.markdown(f"**{model_display_name}**")
+    st.markdown(model_descriptions.get(model_display_name, "No description available"))
 
 # -------------------------------
 # 5) Navigation
@@ -140,20 +409,19 @@ if "current_page" not in st.session_state:
     st.session_state.current_page = "Home"
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "reports" not in st.session_state:
+    st.session_state.reports = {}
 
-home_btn = st.sidebar.button("Home", key="nav_Home", use_container_width=True)
-report_btn = st.sidebar.button("Combined Report", key="nav_Report", use_container_width=True)
-about_btn = st.sidebar.button("About", key="nav_About", use_container_width=True)
+# Define a callback function for page navigation
+def nav_to(page_name):
+    st.session_state.current_page = page_name
 
-if home_btn:
-    st.session_state.current_page = "Home"
-    st.rerun()
-elif report_btn:
-    st.session_state.current_page = "Combined Report"
-    st.rerun()
-elif about_btn:
-    st.session_state.current_page = "About"
-    st.rerun()
+# Create navigation buttons with callbacks instead of rerun
+home_btn = st.sidebar.button("Home", key="nav_Home", on_click=nav_to, args=["Home"], use_container_width=True)
+report_btn = st.sidebar.button("Combined Report", key="nav_Report", on_click=nav_to, args=["Combined Report"], use_container_width=True)
+map_btn = st.sidebar.button("Map View", key="nav_Map", on_click=nav_to, args=["Map View"], use_container_width=True)
+judge_btn = st.sidebar.button("Judge Metrics", key="nav_Judge", on_click=nav_to, args=["Judge Metrics"], use_container_width=True)
+about_btn = st.sidebar.button("About", key="nav_About", on_click=nav_to, args=["About"], use_container_width=True)
 
 page = st.session_state.current_page
 
@@ -161,306 +429,274 @@ page = st.session_state.current_page
 # 6) Page Layout
 # -------------------------------
 if page == "Home":
-    st.title("Welcome to the NVIDIA Multi-Agent Research Assistant")
+    st.title("Welcome to the Crime Analysis Assistant")
     st.markdown("""
-        This application integrates multiple agents to produce comprehensive research reports on NVIDIA:
-        - **RAG Agent**: Retrieves historical quarterly reports from Pinecone.
-        - **Web Search Agent**: Provides real-time insights via SerpAPI.
-        - **Snowflake Agent**: Queries structured valuation metrics and displays charts.
+        This application integrates multiple agents to analyze crime data:
+        - **RAG Agent**: Retrieves historical crime reports from our database.
+        - **Web Search Agent**: Provides real-time crime statistics via SerpAPI.
+        - **Data Agent**: Queries structured crime metrics and displays charts.
+    """)
+    
+    st.subheader("How to use this application:")
+    st.markdown("""
+    1. **Select cities**: Visit the Map View page and click on cities you want to analyze
+    2. **Choose time range**: Use the sidebar to select 'All Years' or a specific year range
+    3. **Select model**: Choose the AI model you want to use for analysis
+    4. **Generate report**: Go to the Combined Report page and enter your research question
+    5. **View metrics**: After generating a report, visit the Judge Metrics page to see quality assessment
     """)
 
 elif page == "Combined Report":
-    st.title("NVIDIA Research Assistant")
-    st.subheader("💬 Research History")
+    handle_combined_report()
 
-    # Show chat history
-    with st.container():
-        for message in st.session_state.chat_history:
-            if message["role"] == "user":
-                periods_text = ", ".join(message.get("selected_periods", []))
-                agents_text = ", ".join(message.get("agents", []))
+elif page == "Map View":
+    st.title("City Crime Statistics")
+    
+    # Initialize selected_cities in session state if not present
+    if "selected_cities" not in st.session_state:
+        st.session_state["selected_cities"] = []
+
+    # Create Folium map with a dark style
+    m = folium.Map(
+        location=[39.8283, -98.5795], 
+        zoom_start=4, 
+        tiles="CartoDB dark_matter",   # Dark map style
+        attr="CartoDB dark_matter"
+    )
+
+    # Add markers for each city
+    for city_name, info in cities.items():
+        folium.Marker(
+            location=[info["lat"], info["lon"]],
+            popup=city_name,
+            tooltip=f"Click for {city_name}",
+            icon=folium.Icon(icon="fa-map-marker", prefix="fa", color="blue", icon_color="white")
+        ).add_to(m)
+
+    # Display the map
+    st_map = st_folium(m, width=700, height=500)
+
+    # Handle clicks
+    clicked_city_name = st_map.get("last_object_clicked_popup")
+    if clicked_city_name:
+        if clicked_city_name in cities:
+            if clicked_city_name not in st.session_state["selected_cities"]:
+                st.session_state["selected_cities"].append(clicked_city_name)
+            st.success(f"✅ You selected: {clicked_city_name}")
+        else:
+            st.warning("⚠️ You clicked on the map but missed a valid marker. Try again.")
+    
+    # Add a button to clear selections
+    if st.session_state["selected_cities"]:
+        if st.button("Clear All Selections"):
+            st.session_state["selected_cities"] = []
+            st.success("✅ All city selections cleared.")
+
+
+    # Display selected cities
+    st.write("---")
+    st.subheader("Selected Cities for Analysis")
+    if st.session_state["selected_cities"]:
+        # Create columns for city info
+        cols = st.columns(min(3, len(st.session_state["selected_cities"])))
+        
+        for i, city in enumerate(st.session_state["selected_cities"]):
+            info = cities[city]
+            col_idx = i % len(cols)
+            with cols[col_idx]:
                 st.markdown(f"""
-                    <div class='user-message'>
-                        <div class='metadata'>📅 {periods_text}<br>🤖 Agents: {agents_text}</div>
-                        <div>🔍 {message['content']}</div>
-                    </div>
-                """, unsafe_allow_html=True)
+                **{city}**
+                - Population: {info['pop']:,}
+                - Crime Rate: {info['crime_rate']:.1f}/1000
+                - Coordinates: {info['lat']:.4f}, {info['lon']:.4f}
+                """)
+                
+                # Add individual remove button
+                if st.button(f"Remove {city}", key=f"remove_{city}"):
+                    st.session_state["selected_cities"].remove(city)
+                    st.success(f"✅ Removed {city} from selections.")
+                    
+                    
+        # Add a button to navigate to report generation
+        st.button("Generate Report with Selected Cities", on_click=nav_to, args=["Combined Report"])
+    else:
+        st.info("No cities selected yet. Click a marker on the map to add a location.")
+
+elif page == "Judge Metrics":
+    st.title("Report Quality Metrics")
+    
+    if not st.session_state.reports:
+        st.warning("No reports have been generated yet.")
+        st.button("Generate a Report", on_click=nav_to, args=["Combined Report"])
+    else:
+        # Get all reports and sort by timestamp
+        reports = dict(sorted(
+            st.session_state.reports.items(),
+            key=lambda x: x[1].get("timestamp", ""),
+            reverse=True
+        ))
+        
+        # Display the latest report first
+        latest_report_id = next(iter(reports))
+        report_data = reports[latest_report_id]
+        
+        st.subheader("Latest Report Analysis")
+        
+        # Display metadata
+        st.markdown(f"""
+            **Question**: {report_data.get('question', 'N/A')}  
+            **Generated**: {datetime.fromisoformat(report_data.get('timestamp', '')).strftime('%Y-%m-%d %H:%M:%S')}  
+            **Model**: {report_data.get('model', 'N/A')}  
+            **Regions**: {', '.join(report_data.get('selected_regions', []))}
+        """)
+        
+        # Extract judge feedback - handle different possible structures
+        judge_feedback = report_data.get("judge_feedback", {})
+        
+        # Get overall score with proper fallbacks
+        score = 0
+        if isinstance(judge_feedback, dict):
+            # Try different possible paths to get the overall score
+            if "overall_score" in judge_feedback:
+                score = float(judge_feedback["overall_score"])
+            elif isinstance(judge_feedback.get("scores"), dict) and "overall" in judge_feedback["scores"]:
+                score = float(judge_feedback["scores"]["overall"])
+        else:
+            score = float(report_data.get("judge_score", 0))
+        
+        # Display score with color coding
+        if score >= 8:
+            st.success(f"### Overall Score: {score:.1f}/10 🌟")
+        elif score >= 6:
+            st.warning(f"### Overall Score: {score:.1f}/10 ⭐")
+        else:
+            st.error(f"### Overall Score: {score:.1f}/10 ⚠️")
+        
+        # Display detailed metrics in two columns with improved handling
+        st.subheader("Detailed Metrics")
+        
+        # Try to get scores from judge_feedback, with multiple fallback options
+        scores = {}
+        if isinstance(judge_feedback, dict):
+            # Option 1: scores are in a 'scores' key
+            if isinstance(judge_feedback.get("scores"), dict):
+                scores = judge_feedback["scores"]
+            # Option 2: scores are directly in judge_feedback (excluding overall_score)
             else:
-                st.markdown(f"""
-                    <div class='assistant-message'>
-                        <div class='metadata'>🤖 NVIDIA Research Assistant</div>
-                        <div>{message['content']}</div>
-                    </div>
-                """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    with st.form("report_form", clear_on_submit=True):
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            question = st.text_input("Research Question", placeholder="What has driven NVIDIA's revenue growth?")
-        with col2:
-            submitted = st.form_submit_button("➤")
-
-    if submitted and question:
-        with st.spinner("🔄 Generating report..."):
-            payload = {
-                "question": question,
-                "search_type": search_type,
-                "selected_periods": selected_periods,
-                "agents": selected_agents
-            }
-            try:
-                response = requests.post(QUERY_URL, json=payload)
-                if response.status_code == 200:
-                    data = response.json()
-                    # Add user message
-                    st.session_state.chat_history.append({
-                        "role": "user",
-                        "content": question,
-                        "search_type": search_type,
-                        "selected_periods": selected_periods,
-                        "agents": selected_agents
-                    })
-                    # Add assistant message
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": data.get("final_report", ""),
-                        "rag_output": data.get("rag_output"),
-                        "snowflake_data": data.get("valuation_data"),
-                        "web_output": data.get("web_output"),
-                        "agents": selected_agents
-                    })
-                    st.rerun()
-                else:
-                    st.error(f"❌ API Error: {response.status_code} - {response.text}")
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
-
-    # Show results in tabs
-    if st.session_state.chat_history:
-        latest = next((msg for msg in reversed(st.session_state.chat_history) if msg["role"] == "assistant"), None)
-        if latest:
+                scores = {k: v for k, v in judge_feedback.items() 
+                         if isinstance(v, (int, float)) and k != "overall_score"}
+                         
+        # Create metric display
+        if scores:
+            metrics_cols = st.columns(2)
+            for i, (metric, value) in enumerate(scores.items()):
+                if isinstance(value, (int, float)):
+                    with metrics_cols[i % 2]:
+                        # Add color indicators to metrics
+                        if value >= 8:
+                            st.metric(metric.capitalize(), f"{value:.1f}/10", delta="Good", delta_color="normal")
+                        elif value >= 6:
+                            st.metric(metric.capitalize(), f"{value:.1f}/10", delta="Average", delta_color="off")
+                        else:
+                            st.metric(metric.capitalize(), f"{value:.1f}/10", delta="Needs Improvement", delta_color="inverse")
+        else:
+            st.info("No detailed metrics available for this report.")
+        
+        # Display improvement suggestions if available
+        if isinstance(judge_feedback, dict) and "improvement_suggestions" in judge_feedback:
+            suggestions = judge_feedback["improvement_suggestions"]
+            if suggestions:
+                st.subheader("Improvement Suggestions")
+                for suggestion in suggestions:
+                    st.markdown(f"- {suggestion}")
+        
+        # Display overall assessment if available
+        if isinstance(judge_feedback, dict) and "overall_assessment" in judge_feedback:
+            st.subheader("Judge Assessment")
+            st.markdown(judge_feedback["overall_assessment"])
+        
+        # Display feedback history if available (from evaluation data)
+        if isinstance(judge_feedback, dict) and "feedback_history" in judge_feedback:
+            with st.expander("📜 Feedback History", expanded=False):
+                for i, feedback in enumerate(judge_feedback["feedback_history"]):
+                    st.markdown(f"**Previous Evaluation #{i+1}**")
+                    st.markdown(f"Score: {feedback.get('overall_score', 'N/A')}/10")
+                    st.markdown(f"Assessment: {feedback.get('overall_assessment', 'N/A')}")
+                    st.markdown("---")
+        
+        # Show report content in expander
+        with st.expander("View Report Content", expanded=False):
+            st.markdown(report_data.get("content", ""))
+            report_md = create_downloadable_report(report_data)
+            st.download_button(
+                label="📥 Download Report",
+                data=report_md,
+                file_name=f"crime_report_{datetime.fromisoformat(report_data.get('timestamp', '')).strftime('%Y%m%d_%H%M%S')}.md",
+                mime="text/markdown"
+            )
+        
+        # Previous reports section
+        if len(reports) > 1:
             st.markdown("---")
-            st.subheader("📊 Detailed Results")
-
-            # Tabs based on which agents are active
-            tabs_to_show = ["Overview"]
-            if "Snowflake Agent" in selected_agents:
-                tabs_to_show.append("Financial Data")
-            if "RAG Agent" in selected_agents:
-                tabs_to_show.append("Document Analysis")
-            if "Web Search Agent" in selected_agents:
-                tabs_to_show.append("Web Results")
-
-            tab_objects = st.tabs(tabs_to_show)
-
-            for i, tab_name in enumerate(tabs_to_show):
-                with tab_objects[i]:
-                    if tab_name == "Overview":
-                        st.markdown(latest["content"])
-                    elif tab_name == "Financial Data":
-                        display_financial_data(latest.get("snowflake_data"))
-                    elif tab_name == "Document Analysis":
-                        # If we have a summarized version from the agent node, show that:
-                        rag_summary = latest.get("rag_summary", None)
-                        if rag_summary:
-                            st.markdown("#### Summarized Historical Insights")
-                            st.write(rag_summary)
-                        else:
-                            # fallback to raw chunks if summary not available
-                            display_rag_results(latest.get("rag_output"))
-                    elif tab_name == "Web Results":
-                        web_summary = latest.get("web_summary", None)
-                        if web_summary and web_summary != "No web data to summarize.":
-                            st.markdown("### Web Summary")
-                            st.write(web_summary)
-                        else:
-                            # fallback to the raw chunk
-                            display_web_results(latest.get("web_output"))
+            st.subheader("Previous Reports")
+            for report_id, data in list(reports.items())[1:]:  # Skip the latest report
+                with st.expander(f"Report from {datetime.fromisoformat(data.get('timestamp', '')).strftime('%Y-%m-%d %H:%M:%S')}"):
+                    st.markdown(f"""
+                        **Question**: {data.get('question', 'N/A')}  
+                        **Score**: {data.get('judge_score', 0)}/10  
+                        **Model**: {data.get('model', 'N/A')}  
+                        **Regions**: {', '.join(data.get('selected_regions', []))}
+                    """)
+                    
+                    # Add a view button that expands to show full content
+                    if st.button(f"View Full Report", key=f"view_report_{report_id}"):
+                        st.markdown(data.get("content", ""))
+                        
+                        # Also show judge feedback for this report
+                        prev_judge_feedback = data.get("judge_feedback", {})
+                        if prev_judge_feedback:
+                            st.subheader("Judge Feedback")
+                            st.json(prev_judge_feedback)
 
 elif page == "About":
-    st.title("About NVIDIA Research Assistant")
+    st.title("About Crime Analysis Assistant")
     st.markdown("""
-        **NVIDIA Multi-Agent Research Assistant** integrates:
-        - **RAG Agent**: Uses Pinecone with metadata filtering to retrieve historical reports.
-        - **Web Search Agent**: Uses SerpAPI for real-time search.
-        - **Snowflake Agent**: Connects to Snowflake for valuation measures and charts.
+        **Crime Analysis Assistant** integrates:
+        - **RAG Agent**: Uses database with metadata filtering to retrieve historical crime reports.
+        - **Web Search Agent**: Uses SerpAPI for real-time crime statistics.
+        - **Data Agent**: Connects to databases for crime metrics and visualization.
+    """)
+    
+    st.subheader("System Architecture")
+    st.markdown("""
+    This system uses a multi-agent approach to analyze crime data:
+    
+    1. **Frontend**: Streamlit application for user interaction
+    2. **Backend**: FastAPI server running the analysis pipeline
+    3. **Agents**: Multiple specialized AI agents that work together:
+       - RAG Agent: Retrieves and processes historical data
+       - Web Search Agent: Gathers current information from the web
+       - Data Analysis Agent: Performs statistical analysis on crime data
+       - Comparison Agent: Compares trends across different regions
+       - Judge Agent: Evaluates report quality
+       
+    4. **LLM Integration**: Uses multiple language models (Claude, Gemini, etc.) for analysis
+    """)
+    
+    st.subheader("How to Use")
+    st.markdown("""
+    1. **Select cities** on the Map View
+    2. **Choose time range** in the sidebar
+    3. **Enter your query** on the Combined Report page
+    4. View the generated report
+    5. Check quality metrics on the Judge Metrics page
     """)
 
-# -------------------------------
-# 7) Custom CSS (UNCHANGED)
-# -------------------------------
+# Inject FontAwesome for map icons
 st.markdown("""
-<style>
-/* ---------------------------------- */
-/* Dark background, Nvidia green accent */
-/* ---------------------------------- */
-body, .main, [data-testid="stHeader"], [data-testid="stSidebar"] {
-    background-color: #1E1E1E !important;
-    color: #FFFFFF !important;
-    font-family: "Segoe UI", sans-serif;
-}
-
-/* ---------------------------------- */
-/* Make links NVIDIA green, no underline */
-/* ---------------------------------- */
-a, a:visited {
-    color: #76B900 !important; /* Nvidia green */
-    text-decoration: none !important;
-}
-a:hover {
-    color: #5c8d00 !important; 
-    text-decoration: underline !important;
-}
-
-/* ---------------------------------- */
-/* Headings in NVIDIA green */
-/* ---------------------------------- */
-h1, h2, h3, h4 {
-    color: #76B900 !important; /* Nvidia Green */
-}
-
-/* ---------------------------------- */
-/* Block container width */
-/* ---------------------------------- */
-.block-container {
-    max-width: 1400px; /* Full width container */
-}
-
-/* ---------------------------------- */
-/* Chat Bubbles styling */
-/* ---------------------------------- */
-.chat-container {
-    margin-bottom: 30px;
-    max-height: 55vh; /* adjustable height */
-    overflow-y: auto;
-    padding: 1em;
-    border: 1px solid #3a3a3a;
-    border-radius: 10px;
-    background-color: #2b2b2b;
-}
-.user-message {
-    background-color: #2E8B57; /* or #2196F3 if you prefer bluish */
-    padding: 15px;
-    border-radius: 15px;
-    margin: 10px 0;
-    color: white;
-}
-.assistant-message {
-    background-color: #262730;
-    padding: 15px;
-    border-radius: 15px;
-    margin: 10px 0;
-    color: white;
-}
-.metadata {
-    font-size: 0.8em;
-    color: #B0B0B0;
-    margin-bottom: 5px;
-}
-
-/* ---------------------------------- */
-/* Circular submit button (ChatGPT style) */
-/* ---------------------------------- */
-[data-testid="stFormSubmitButton"] button {
-    border-radius: 50%;
-    width: 50px;
-    height: 50px;
-    padding: 0;
-    min-width: 0;
-    font-size: 1.4em;
-    font-weight: bold;
-    background-color: #76B900;
-    color: #fff;
-    border: none;
-    transition: background-color 0.3s ease;
-}
-[data-testid="stFormSubmitButton"] button:hover {
-    background-color: #5c8d00;
-}
-
-/* ---------------------------------- */
-/* Tab styling to match dark theme */
-/* ---------------------------------- */
-div[data-testid="stTabs"] button {
-    background-color: #333333;
-    color: #fff;
-    border: none;
-    border-radius: 0;
-    padding: 0.5rem 1rem;
-}
-div[data-testid="stTabs"] button[aria-selected="true"] {
-    background-color: #76B900 !important;
-    color: #000 !important;
-    font-weight: bold;
-}
-
-/* ---------------------------------- */
-/* Datatable override for dark theme */
-/* ---------------------------------- */
-[data-testid="stDataFrame"] {
-    background-color: #262730;
-    color: #fff;
-    border: none;
-}
-[data-testid="stDataFrame"] table {
-    color: #fff;
-}
-
-/* ---------------------------------- */
-/* Sidebar background & text colors */
-/* ---------------------------------- */
-[data-testid="stSidebar"] {
-    background-color: #2b2b2b !important; /* Dark gray background */
-}
-[data-testid="stSidebar"] label, 
-[data-testid="stSidebar"] .stRadio,
-[data-testid="stSidebar"] .stButton {
-    color: #fff !important; /* White text */
-}
-[data-testid="stSidebar"] .stRadio > div:hover {
-    background-color: #333333 !important;
-}
-
-/* -------------------------------------- */
-/* Sidebar nav buttons in NVIDIA green   */
-/* -------------------------------------- */
-[data-testid="stSidebar"] .stButton > button {
-    background-color: #0a8006 !important; /* NVIDIA green */
-    color: #fff !important;
-    border: none !important;
-}
-[data-testid="stSidebar"] .stButton > button:hover {
-    background-color: #5c8d00 !important; /* darker green hover */
-    color: #fff !important;
-}
-
-/* ---------------------------------- */
-/* Agent Selection Submit Button */
-/* ---------------------------------- */
-[data-testid="stButton"] button[kind="primary"] {
-    background-color: #76B900 !important;
-    color: white !important;
-    border: none !important;
-    padding: 0.5rem 1rem !important;
-    border-radius: 4px !important;
-    transition: background-color 0.3s ease !important;
-}
-
-[data-testid="stButton"] button[kind="primary"]:hover {
-    background-color: #5c8d00 !important;
-}
-
-/* ---------------------------------- */
-/* Navigation Buttons Layout */
-/* ---------------------------------- */
-[data-testid="column"] {
-    padding: 0.25rem !important;
-}
-
-[data-testid="stButton"] button {
-    width: 100% !important;
-    margin: 0 !important;
-}
-</style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
 """, unsafe_allow_html=True)
+
+# Then load your custom CSS
+with open("styles.css", "r") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)

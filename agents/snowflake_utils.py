@@ -267,7 +267,7 @@ class CrimeDataAnalyzer:
             plt.margins(y=0.1)
             
             plt.tight_layout()
-            all_incidents_path = f"all_incidents_trend_{timestamp}.png"
+            all_incidents_path = f"all_incidents_trend.png"
             plt.savefig(all_incidents_path, dpi=150, bbox_inches='tight')
             plt.close()
             visualization_paths['all_incidents_trend'] = all_incidents_path
@@ -322,7 +322,7 @@ class CrimeDataAnalyzer:
                 plt.margins(y=0.2)
                 
                 plt.tight_layout()
-                city_incidents_path = f'top5_incidents_{city.replace(" ", "_")}_{timestamp}.png'
+                city_incidents_path = f'top5_incidents_{city.replace(" ", "_")}.png'
                 plt.savefig(city_incidents_path, dpi=150, bbox_inches='tight')
                 plt.close()
                 visualization_paths[f'top5_incidents_{city.replace(" ", "_")}'] = city_incidents_path
@@ -364,7 +364,7 @@ class CrimeDataAnalyzer:
             
             # Adjust layout
             plt.tight_layout()
-            distribution_path = f"yearly_distribution_{timestamp}.png"
+            distribution_path = f"yearly_distribution.png"
             plt.savefig(distribution_path, dpi=150, bbox_inches='tight')
             plt.close()
             visualization_paths['yearly_distribution'] = distribution_path

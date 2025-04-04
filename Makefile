@@ -41,7 +41,7 @@ ragagent:
 
 # Build commands
 fastapibuild:
-	docker build --platform=linux/amd64 -t gcr.io/gen-lang-client-0567410120/fastapi-agentic-app .
+	docker build --platform=linux/amd64 -t gcr.io/gen-lang-client-0567410120/fastapi-crimereport-app .
 
 streamlitbuild:
 	docker build --platform=linux/amd64 -t gcr.io/gen-lang-client-0567410120/streamlit-agentic-app .

@@ -1,0 +1,230 @@
+/* ---------------------------------- */
+/* Dark background, blue accent */
+/* ---------------------------------- */
+body, .main, [data-testid="stHeader"], [data-testid="stSidebar"] {
+    background-color: #1E1E1E !important;
+    color: #FFFFFF !important;
+    font-family: "Segoe UI", sans-serif;
+}
+
+/* ---------------------------------- */
+/* Make links blue, no underline */
+/* ---------------------------------- */
+a, a:visited {
+    color: #2196F3 !important; /* blue */
+    text-decoration: none !important;
+}
+a:hover {
+    color: #1976D2 !important; 
+    text-decoration: underline !important;
+}
+
+/* ---------------------------------- */
+/* Headings in blue */
+/* ---------------------------------- */
+h1, h2, h3, h4 {
+    color: #2196F3 !important; /* blue */
+}
+
+/* ---------------------------------- */
+/* Block container width */
+/* ---------------------------------- */
+.block-container {
+    max-width: 1400px; /* Full width container */
+}
+
+/* ---------------------------------- */
+/* Chat Bubbles styling */
+/* ---------------------------------- */
+.chat-container {
+    margin-bottom: 30px;
+    max-height: 55vh; /* adjustable height */
+    overflow-y: auto;
+    padding: 1em;
+    border: 1px solid #3a3a3a;
+    border-radius: 10px;
+    background-color: #2b2b2b;
+}
+.user-message {
+    background-color: #2E8B57; /* or #2196F3 if you prefer bluish */
+    padding: 15px;
+    border-radius: 15px;
+    margin: 10px 0;
+    color: white;
+}
+.assistant-message {
+    background-color: #262730;
+    padding: 15px;
+    border-radius: 15px;
+    margin: 10px 0;
+    color: white;
+}
+.metadata {
+    font-size: 0.8em;
+    color: #B0B0B0;
+    margin-bottom: 5px;
+}
+
+/* ---------------------------------- */
+/* Circular submit button (ChatGPT style) */
+/* ---------------------------------- */
+[data-testid="stFormSubmitButton"] button {
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    padding: 0;
+    min-width: 0;
+    font-size: 1.4em;
+    font-weight: bold;
+    background-color: #2196F3;
+    color: #fff;
+    border: none;
+    transition: background-color 0.3s ease;
+}
+[data-testid="stFormSubmitButton"] button:hover {
+    background-color: #1976D2;
+}
+[data-testid="stFormSubmitButton"] {
+    margin-top: 30px !important;
+}
+
+/* ---------------------------------- */
+/* Tab styling to match dark theme */
+/* ---------------------------------- */
+div[data-testid="stTabs"] button {
+    background-color: #333333;
+    color: #fff;
+    border: none;
+    border-radius: 0;
+    padding: 0.5rem 1rem;
+}
+div[data-testid="stTabs"] button[aria-selected="true"] {
+    background-color: #2196F3 !important;
+    color: #fff !important;
+    font-weight: bold;
+}
+
+/* ---------------------------------- */
+/* Datatable override for dark theme */
+/* ---------------------------------- */
+[data-testid="stDataFrame"] {
+    background-color: #262730;
+    color: #fff;
+    border: none;
+}
+[data-testid="stDataFrame"] table {
+    color: #fff;
+}
+
+/* ---------------------------------- */
+/* Sidebar background & text colors */
+/* ---------------------------------- */
+[data-testid="stSidebar"] {
+    background-color: #2b2b2b !important; /* Dark gray background */
+}
+[data-testid="stSidebar"] label, 
+[data-testid="stSidebar"] .stRadio,
+[data-testid="stSidebar"] .stButton {
+    color: #fff !important; /* White text */
+}
+[data-testid="stSidebar"] .stRadio > div:hover {
+    background-color: #333333 !important;
+}
+
+/* -------------------------------------- */
+/* Sidebar nav buttons in blue   */
+/* -------------------------------------- */
+[data-testid="stSidebar"] .stButton > button {
+    background-color: #2196F3 !important; /* blue */
+    color: #fff !important;
+    border: none !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+    background-color: #1976D2 !important; /* darker blue hover */
+    color: #fff !important;
+}
+
+/* ---------------------------------- */
+/* Agent Selection Submit Button */
+/* ---------------------------------- */
+[data-testid="stButton"] button[kind="primary"] {
+    background-color: #2196F3 !important;
+    color: white !important;
+    border: none !important;
+    padding: 0.5rem 1rem !important;
+    border-radius: 4px !important;
+    transition: background-color 0.3s ease !important;
+}
+
+[data-testid="stButton"] button[kind="primary"]:hover {
+    background-color: #1976D2 !important;
+}
+
+/* ---------------------------------- */
+/* Navigation Buttons Layout */
+/* ---------------------------------- */
+[data-testid="column"] {
+    padding: 0.25rem !important;
+}
+
+[data-testid="stButton"] button {
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+/* Slider styling */
+.stSlider [data-baseweb="slider"] {
+    margin-top: 10px;
+}
+
+/* Slider track */
+.stSlider [data-baseweb="slider"] div[role="slider"] {
+    background-color: #2196F3 !important;
+    border-color: #2196F3 !important;
+}
+
+/* Slider fill */
+.stSlider [data-baseweb="slider"] div[data-testid="stSliderProgress"] {
+    background-color: #2196F3 !important;
+}
+
+/* Slider thumb */
+.stSlider [data-baseweb="slider"] div[role="slider"]::before {
+    background-color: #2196F3 !important;
+    border-color: #2196F3 !important;
+}
+
+/* Slider value text */
+.stSlider [data-baseweb="slider"] div[data-testid="stTickBarElement"] {
+    color: white !important;
+}
+
+/* Use a slightly lighter shade for main background to differentiate
+   from the sidebar. Adjust to taste. */
+   body, .main, [data-testid="stHeader"], [data-testid="stSidebar"] {
+    background-color: #1E1E1E !important;
+    color: #2196f3 !important;
+    font-family: "Segoe UI", sans-serif;
+}
+
+/* Headings in a bright color for better contrast on dark background */
+h1, h2, h3, h4 {
+    color: #2196F3 !important;
+}
+
+/* If icons appear too dark, lighten them here if needed: */
+.fa {
+    color: #FFFFFF !important;
+}
+
+/* Download button styling */
+a[download] {
+    color: white !important;
+    text-decoration: none !important;
+    font-weight: bold;
+}
+
+a[download]:hover {
+    color: #E3F2FD !important;
+    text-decoration: none !important;
+}
