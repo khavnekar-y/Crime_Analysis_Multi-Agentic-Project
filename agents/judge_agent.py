@@ -85,6 +85,37 @@ class JudgeAgent:
         except Exception as e:
             print(f"JudgeAgent evaluation error: {str(e)}")
             return self._create_error_response(str(e))
+    
+    def _create_error_response(self, error_message: str) -> Dict:
+        """Create standardized error response when evaluation fails."""
+        return {
+            "status": "error",
+            "error": error_message,
+            "overall_score": 5,  # Default middle score
+            "scores": {
+                "completeness": 5,
+                "accuracy": 5, 
+                "usefulness": 5,
+                "clarity": 5,
+                "overall": 5
+            },
+            "feedback": {
+                "strengths": ["Unable to evaluate due to error"],
+                "weaknesses": ["Error during evaluation process"],
+                "improvements": [f"Technical error: {error_message}"]
+            },
+            "overall_assessment": f"Report evaluation failed due to technical error: {error_message}"
+        }
+
+    def _get_relevant_feedback(self, state: Dict) -> List[Dict]:
+        """Retrieve relevant feedback from past evaluations."""
+        try:
+            # Return most recent feedback entries if available
+            return self.feedback_history[-3:] if hasattr(self, 'feedback_history') and self.feedback_history else []
+        except Exception as e:
+            print(f"Error retrieving feedback: {str(e)}")
+            return []
+        
     def _evaluate_completeness(self, report_data: Dict) -> Dict:
         """Evaluate completeness of the report."""
         required_sections = [

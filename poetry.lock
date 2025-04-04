@@ -7794,6 +7794,21 @@ files = [
 h11 = ">=0.9.0,<1"
 
 [[package]]
+name = "xai-grok-sdk"
+version = "0.0.12"
+description = "Lightweight xAI SDK with minimal dependencies"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "xai_grok_sdk-0.0.12-py3-none-any.whl", hash = "sha256:6568a8e7b7c0e261227a94379aae96987569fb27c1b1274611aadaeb82222bac"},
+    {file = "xai_grok_sdk-0.0.12.tar.gz", hash = "sha256:d490996c078e0d9c85de6f02a51da13d0bad59c77f02216dedc7413c31090262"},
+]
+
+[package.dependencies]
+requests = ">=2.32.3"
+
+[[package]]
 name = "xxhash"
 version = "3.5.0"
 description = "Python binding for xxHash"
@@ -8159,4 +8174,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "2fc0e27069a959dd8c0c66e0f49da29628d64a755655332df05686c07ea023b1"
+content-hash = "c8cbce427bf2524306d9a09be4dcb9edbc5db588d5a71b3e4776d03a5aaa2433"

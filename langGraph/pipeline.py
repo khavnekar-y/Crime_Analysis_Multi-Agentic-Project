@@ -71,6 +71,7 @@ class CrimeReportState(TypedDict, total=False):
     #Report organization 
     report_sections: Dict[str, Any]  # Structured report sections with content
     visualizations: Dict[str, Any]  # All visualizations from different sources
+    contextual_images: Dict[str, Any]  # Contextual images generated for the report
     
     # Processing metadata
     chat_history: List[Dict[str, Any]]  # Conversation history with feedback
@@ -177,8 +178,7 @@ def rag_node(state: CrimeReportState) -> Dict:
             search_mode=state.get("search_mode", "all_years"),
             start_year=state.get("start_year"),
             end_year=state.get("end_year"),
-            selected_regions=state.get("selected_regions", []),
-            model_type=model_type  # Pass model_type explicitly
+            selected_regions=state.get("selected_regions", []) 
         )
         
         print(f"✅ RAG analysis complete using {result.get('model_used', model_type)}")
@@ -226,237 +226,50 @@ def snowflake_node(state: CrimeReportState) -> Dict:
         traceback.print_exc()
         return {"snowflake_output": {"error": str(e), "status": "failed"}}
     
+# Replace/update the contextual_image_node in pipeline.py
 def contextual_image_node(state: CrimeReportState) -> Dict:
-    """Generate contextual images based on crime data insights using Gemini native image generation."""
+    """Generate contextual images for the report."""
     try:
         print("\n🎨 Generating contextual images for the report...")
         
-        # Collect insights from various sources
-        snowflake_insights = state.get("snowflake_output", {}).get("analysis", "")
-        rag_insights = state.get("rag_output", {}).get("insights", "")
-        web_insights = state.get("web_output", {}).get("markdown_report", "")[:500]
-        
-        # Extract key themes for image generation
-        llm = llmselection.get_llm(state["model_type"])
-        
-        theme_prompt = f"""
-        Based on the following crime data insights, identify 3 key visual themes that would 
-        enhance the report with meaningful contextual images. Each theme should be specific 
-        enough for image generation.
-        
-        INSIGHTS FROM DATA:
-        {snowflake_insights[:300]}...
-        {rag_insights[:300]}...
-        
-        For each theme:
-        1. Provide a descriptive title (3-5 words)
-        2. Create a detailed image prompt (50-80 words) for an image generator - focus on professional, 
-           data visualization style imagery appropriate for a crime report
-        3. Explain why this visual would enhance the report
-        
-        Format as JSON:
-        {{
-            "themes": [
-                {{
-                    "title": "Theme title",
-                    "image_prompt": "Detailed prompt for image generator",
-                    "rationale": "Why this image matters"
-                }}
-            ]
-        }}
-        """
-        
-        themes_response = llmselection.get_response(llm, theme_prompt)
-        
-        # Parse themes
-        try:
-            themes_data = json.loads(themes_response)
-            themes = themes_data.get("themes", [])
-        except:
-            # Fallback if JSON parsing fails
-            print("Warning: Could not parse themes JSON, using default themes")
-            themes = [
-                {
-                    "title": "Crime Trend Visualization",
-                    "image_prompt": f"Create a professional data visualization showing crime trends in {', '.join(state['selected_regions'])} with clear decreasing or increasing patterns. Use a clean blue color scheme with data points and trend lines. Include a legend and axis labels. Modern analytical style.",
-                    "rationale": "Provides visual overview of key trends"
-                },
-                {
-                    "title": "Safety Measures Illustration",
-                    "image_prompt": f"A professional illustration of community safety measures in an urban setting resembling {state['selected_regions'][0]}. Show police presence, neighborhood watch systems, and well-lit streets with security cameras. Use a cool color palette with blue and green tones. Informative style with labels.",
-                    "rationale": "Visualizes key safety recommendations"
-                },
-                {
-                    "title": "Crime Prevention Concept",
-                    "image_prompt": f"Create a conceptual image of crime prevention strategies in {state['selected_regions'][0]}. Show community engagement programs, youth activities, and environmental design improvements that deter crime. Use a modern, clean style with infographic elements and a professional color scheme. Include small explanatory labels.",
-                    "rationale": "Supports prevention recommendations"
-                }
-            ]
-        
-        # Generate images using Gemini native image generation
+        # Create simpler fallback that will always work
         contextual_images = {}
         
-        try:
-            # Initialize Google Gemini API with proper credentials
-            from google import genai
-            from google.genai import types
-            from PIL import Image 
-            from io import BytesIO
-            import base64
-            
-            # Set up the Gemini client
-            genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-            client = genai.Client()
-            
-            print("✅ Connected to Google Gemini API for image generation")
-            
-            for i, theme in enumerate(themes[:3]):  # Limit to 3 images
-                try:
-                    # Get the image prompt
-                    img_prompt = theme.get("image_prompt")
-                    print(f"Generating image for: {theme.get('title')}")
-                    print(f"Using prompt: {img_prompt[:100]}...")
-                    
-                    # Call Gemini image generation model
-                    response = client.models.generate_content(
-                        model="gemini-2.0-flash-exp-image-generation",
-                        contents=img_prompt,
-                        config=types.GenerateContentConfig(
-                            response_modalities=['Text', 'Image']
-                        )
-                    )
-                    
-                    # Extract and save the generated image
-                    for part in response.candidates[0].content.parts:
-                        if part.inline_data is not None:
-                            # Save the generated image
-                            img_filename = f"contextual_image_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                            image = Image.open(BytesIO(part.inline_data.data))
-                            image.save(img_filename)
-                            
-                            # Add to results
-                            contextual_images[theme.get("title")] = {
-                                "path": img_filename,
-                                "prompt": img_prompt,
-                                "rationale": theme.get("rationale")
-                            }
-                            
-                            print(f"✅ Generated contextual image: {theme.get('title')}")
-                            break
-                        elif part.text is not None:
-                            print(f"Image generation model returned text: {part.text[:100]}...")
-                except Exception as e:
-                    print(f"Error generating image '{theme.get('title')}': {e}")
-                    # Continue with next theme if one fails
+        # Generate simple themed images using Unsplash
+        themes = [
+            {"title": "Crime Prevention", "keywords": "crime,prevention,security"},
+            {"title": f"Urban Safety in {state['selected_regions'][0]}", 
+             "keywords": f"urban,safety,{state['selected_regions'][0]}"},
+            {"title": "Community Policing", "keywords": "community,police,neighborhood"}
+        ]
         
-        except Exception as e:
-            print(f"Could not initialize Gemini image generation: {e}")
-            
-        # If Gemini image generation fails, fall back to Unsplash
-        if not contextual_images:
-            print("⚠️ Falling back to Unsplash for images")
-            for i, theme in enumerate(themes[:3]):
-                try:
-                    img_prompt = theme.get("image_prompt")
-                    keywords = re.sub(r'[^\w\s]', '', img_prompt).replace(' ', '+')
-                    img_url = f"https://source.unsplash.com/featured/?{keywords}"
-                    img_response = requests.get(img_url)
-                    
-                    # Save the image
+        for i, theme in enumerate(themes):
+            try:
+                # Use Unsplash source API which doesn't require authentication
+                img_url = f"https://source.unsplash.com/featured/?{theme['keywords']}"
+                img_response = requests.get(img_url)
+                
+                if img_response.status_code == 200:
                     img_filename = f"contextual_image_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                     with open(img_filename, "wb") as f:
                         f.write(img_response.content)
                     
-                    # Add to results
-                    contextual_images[theme.get("title")] = {
+                    contextual_images[theme["title"]] = {
                         "path": img_filename,
-                        "prompt": img_prompt,
-                        "rationale": theme.get("rationale")
+                        "prompt": theme["keywords"],
+                        "rationale": f"Illustrative image for {theme['title']}"
                     }
-                    
-                    print(f"✅ Generated fallback image: {theme.get('title')}")
-                except Exception as e:
-                    print(f"Error generating fallback image '{theme.get('title')}': {e}")
+                    print(f"✅ Generated image for: {theme['title']}")
+            except Exception as e:
+                print(f"Error with image '{theme['title']}': {e}")
         
-        # Final fallback to static URLs if no images generated
-        if not contextual_images:
-            print("⚠️ Using placeholder image URLs as final fallback")
-            contextual_images = {
-                "Crime Hotspots": {
-                    "path": "https://source.unsplash.com/featured/?crime,map",
-                    "prompt": "Crime hotspots map visualization",
-                    "rationale": "Shows geographic distribution of crime"
-                },
-                "Prevention Strategies": {
-                    "path": "https://source.unsplash.com/featured/?community,safety",
-                    "prompt": "Community crime prevention visualization",
-                    "rationale": "Illustrates prevention strategies"
-                }
-            }
-                    
-        print(f"✅ Contextual image generation complete - created {len(contextual_images)} images")
+        print(f"✅ Generated {len(contextual_images)} contextual images")
         return {"contextual_images": contextual_images}
         
     except Exception as e:
-        print(f"❌ Contextual image generation error: {str(e)}")
-        traceback.print_exc()
+        print(f"❌ Image generation error: {str(e)}")
         return {"contextual_images": {}}
 
-
-def _create_temporal_comparison(state: CrimeReportState) -> Dict:
-    """Create temporal comparison when only one region is selected."""
-    try:
-        region = state["selected_regions"][0]
-        snowflake_data = state.get("snowflake_output", {})
-        rag_data = state.get("rag_output", {})
-        
-        # Use LLM to generate temporal comparison
-        llm = llmselection.get_llm(state["model_type"])
-        
-        # Extract statistics if available
-        stats = snowflake_data.get("statistics", {})
-        
-        # Create comparison prompt based on available data
-        temporal_prompt = f"""
-        Create a detailed temporal comparison of crime patterns in {region} across different time periods.
-        
-        Statistical data:
-        {json.dumps(stats, indent=2)[:1000]}...
-        
-        Historical context:
-        {rag_data.get("insights", "No historical context available")[:500]}...
-        
-        Please provide:
-        1. Year-over-year changes in overall crime rates
-        2. Specific crime types showing notable trends over time
-        3. Seasonal patterns if discernible
-        4. Key turning points or trend changes
-        5. Long-term trajectory analysis
-        
-        Format your response with clear headings, bullet points, and temporal analysis language.
-        """
-        
-        temporal_analysis = llmselection.get_response(llm, temporal_prompt)
-        
-        # Get visualizations from snowflake output
-        visualizations = {}
-        if "visualizations" in snowflake_data and "paths" in snowflake_data["visualizations"]:
-            visualizations = snowflake_data["visualizations"]["paths"]
-        
-        comparison_output = {
-            "analysis": temporal_analysis,
-            "visualizations": visualizations,
-            "status": "success",
-            "comparison_type": "temporal"  # Flag that this is temporal, not cross-region
-        }
-        
-        print(f"✅ Temporal comparison analysis complete")
-        return {"comparison_output": comparison_output}
-        
-    except Exception as e:
-        print(f"❌ Temporal comparison error: {str(e)}")
-        traceback.print_exc()
-        return {"comparison_output": {"error": str(e), "status": "failed"}}
 
 def comparison_node(state: CrimeReportState) -> Dict:
     """Create comparative analysis using ComparisonAgent with memory."""
@@ -749,7 +562,7 @@ def synthesis_node(state: CrimeReportState) -> Dict:
         synthesis_tool = Tool(
             name="information_synthesis",
             description="Synthesize information from multiple sources",
-            func=lambda x: x  # Simple pass-through function
+            func=lambda x: x  
         )
         
         synthesis_agent = initialize_agent(
@@ -782,7 +595,7 @@ def synthesis_node(state: CrimeReportState) -> Dict:
         Key data points to consider:
         1. {snowflake_data[:200]}...
         2. {rag_data[:200]}...
-        3. {web_data[:200]}...
+        3. {web_data}...
         """
         
         report_sections["executive_summary"]["content"] = synthesis_agent.run(exec_summary_prompt)
@@ -871,9 +684,14 @@ def final_report_node(state: CrimeReportState) -> Dict:
         print("\n📊 Generating final crime report...")
         
         # Get report sections and visualizations
-        report_sections = state["report_sections"]
-        visualizations = state["visualizations"]
+        report_sections = state.get("report_sections", {})
+        visualizations = state.get("visualizations", {})
         contextual_images = state.get("contextual_images", {})
+        
+        # Log for debugging
+        print(f"Found {len(report_sections)} report sections")
+        print(f"Found {len(visualizations)} visualizations")
+        print(f"Found {len(contextual_images)} contextual images")
         
         # Create final report structure
         final_report = {
@@ -887,14 +705,12 @@ def final_report_node(state: CrimeReportState) -> Dict:
                 "model": state["model_type"]
             },
             "sections": [],
-            "visualizations": visualizations,
-            "contextual_images": contextual_images,
+            "visualizations": list(visualizations.values()) if visualizations else [],
             "metadata": {
                 "source_count": len(visualizations),
-                "contextual_images_count": len(contextual_images),
-                "word_count": sum(len(section["content"].split()) 
+                "word_count": sum(len(section.get("content", "").split()) 
                                  for section in report_sections.values() 
-                                 if isinstance(section["content"], str)),
+                                 if isinstance(section.get("content", ""), str)),
                 "section_count": len(report_sections)
             }
         }
@@ -905,28 +721,63 @@ def final_report_node(state: CrimeReportState) -> Dict:
             key=lambda x: x.get("order", 999)
         )
         
-        # Insert contextual images strategically within the sections
+        # Process contextual images if present
         if contextual_images:
-            # Add contextual images to relevant sections
+            # Add all contextual images to the final report
+            final_report["contextual_images"] = contextual_images
+            print(f"✅ Added {len(contextual_images)} contextual images to report")
+            
+            # Track which images have been assigned
+            assigned_images = set()
+            
+            # Map sections to relevant image themes
+            section_image_mapping = {
+                "safety": ["safety", "security", "protection"],
+                "executive_summary": ["crime", "analysis", "overview"],
+                "recommendations": ["prevention", "community", "policing"],
+                "forecast": ["future", "trend", "projection"],
+                "current_analysis": ["statistics", "data", "current"]
+            }
+            
+            # Assign images to sections based on relevance
             for section in ordered_sections:
-                section_title = section.get("title", "").lower()
-                section_content = section.get("content", "")
+                section_key = next((key for key in section_image_mapping if key in section.get("title", "").lower()), None)
                 
-                # Find relevant contextual images for this section
-                relevant_images = []
-                for img_title, img_data in contextual_images.items():
-                    # Check if image theme matches section
-                    if any(kw in section_title.lower() for kw in img_title.lower().split()):
-                        relevant_images.append(img_data)
-                    # Or check if image rationale mentions key terms in section
-                    elif "rationale" in img_data and any(kw in section_content.lower() for kw in img_data["rationale"].lower().split()):
-                        relevant_images.append(img_data)
-                
-                # Add relevant images to this section
-                if relevant_images:
-                    if "contextual_images" not in section:
-                        section["contextual_images"] = []
-                    section["contextual_images"].extend([img["path"] for img in relevant_images])
+                if section_key:
+                    relevant_terms = section_image_mapping[section_key]
+                    
+                    # Find matching images
+                    for img_title, img_data in contextual_images.items():
+                        if any(term in img_title.lower() for term in relevant_terms) and img_title not in assigned_images:
+                            # Ensure the section has a contextual_images list
+                            if "contextual_images" not in section:
+                                section["contextual_images"] = []
+                                
+                            # Add image path to section
+                            img_path = img_data.get("path", "")
+                            if img_path:
+                                section["contextual_images"].append(img_path)
+                                assigned_images.add(img_title)
+                                print(f"✅ Added image '{img_title}' to section '{section.get('title')}'")
+                                
+            # Update metadata with count of assigned images
+            final_report["metadata"]["contextual_images_count"] = len(contextual_images)
+            print(f"✅ Assigned {len(assigned_images)} contextual images to sections")
+            
+            # Assign remaining unassigned images to appendix
+            appendix = next((s for s in ordered_sections if "appendix" in s.get("title", "").lower()), None)
+            if appendix:
+                unassigned = [img_data.get("path") for img_title, img_data in contextual_images.items() 
+                             if img_title not in assigned_images and "path" in img_data]
+                             
+                if unassigned:
+                    if "contextual_images" not in appendix:
+                        appendix["contextual_images"] = []
+                    appendix["contextual_images"].extend(unassigned)
+                    print(f"✅ Added {len(unassigned)} unassigned images to appendix")
+        else:
+            print("⚠️ No contextual images found")
+            final_report["metadata"]["contextual_images_count"] = 0
         
         final_report["sections"] = ordered_sections
         
@@ -937,7 +788,8 @@ def final_report_node(state: CrimeReportState) -> Dict:
             time_period=final_report["parameters"]["time_period"]
         )
         
-        final_report["cover_image"] = cover_image_path
+        if cover_image_path:
+            final_report["cover_image"] = cover_image_path
         
         print("✅ Final report generated successfully")
         print(f"📈 Report includes {final_report['metadata']['source_count']} visualizations")
@@ -958,7 +810,6 @@ def final_report_node(state: CrimeReportState) -> Dict:
                 "content": str(e)
             }]
         }}
-
 
 def judge_node(state: CrimeReportState) -> Dict:
     """Evaluate report quality using JudgeAgent with memory."""

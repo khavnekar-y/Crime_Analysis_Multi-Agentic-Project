@@ -45,7 +45,7 @@ class RAGAgent:
     def __init__(self, model_name: Optional[str] = None):
         """Initialize the RAG agent with the specified model."""
         # Use passed model or default to Claude 3 Haiku
-        self.model_name = model_name or "claude-3-haiku-20240307"
+        self.model_name = model_name
         print(f"Initializing RAG Agent with model: {self.model_name}")
         
         # Initialize the LLM
@@ -359,7 +359,7 @@ if __name__ == "__main__":
                 print(f"Results saved to {filename}")
                 
                 # Now insights should be available
-                print(f"Insights preview: {processed_result.get('insights', 'No insights')[:100]}...")
+                print(f"Insights preview: {processed_result.get('insights', 'No insights')}...")
             else:
                 print(f"Error: {result}")
         except Exception as e:
