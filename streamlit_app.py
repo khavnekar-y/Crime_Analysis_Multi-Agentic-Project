@@ -9,7 +9,7 @@ import folium
 # 1) Page Config for Wide Layout
 # -------------------------------
 st.set_page_config(
-    page_title="NVIDIA Research Assistant",
+    page_title="Crime Analysis Assistant",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -23,12 +23,12 @@ QUERY_URL = f"{API_URL}/research_report"
 
 # Add cities data after the API_URL definition
 cities = {
-    "New York": {"lat": 40.7128, "lon": -74.0060, "pop": 8419600},
-    "San Francisco": {"lat": 37.7749, "lon": -122.4194, "pop": 883305},
-    "Seattle": {"lat": 47.6062, "lon": -122.3321, "pop": 744955},
-    "Los Angeles": {"lat": 34.0522, "lon": -118.2437, "pop": 3980400},
-    "Houston": {"lat": 29.7604, "lon": -95.3698, "pop": 2328000},
-    "Chicago": {"lat": 41.8781, "lon": -87.6298, "pop": 2716000},
+    "New York": {"lat": 40.7128, "lon": -74.0060, "pop": 8419600, "crime_rate": 2.8},
+    "San Francisco": {"lat": 37.7749, "lon": -122.4194, "pop": 883305, "crime_rate": 6.1},
+    "Seattle": {"lat": 47.6062, "lon": -122.3321, "pop": 744955, "crime_rate": 5.2},
+    "Los Angeles": {"lat": 34.0522, "lon": -118.2437, "pop": 3980400, "crime_rate": 3.9},
+    "Houston": {"lat": 29.7604, "lon": -95.3698, "pop": 2328000, "crime_rate": 5.6},
+    "Chicago": {"lat": 41.8781, "lon": -87.6298, "pop": 2716000, "crime_rate": 4.7},
 }
 
 # -------------------------------
@@ -82,7 +82,7 @@ def display_web_results(data):
 # -------------------------------
 # 4) Sidebar Configuration
 # -------------------------------
-st.sidebar.title("NVIDIA Research Assistant")
+st.sidebar.title("Crime Analysis Assistant")
 st.sidebar.markdown("### Search Configuration")
 
 search_type = st.sidebar.radio(
@@ -177,16 +177,16 @@ page = st.session_state.current_page
 # 6) Page Layout
 # -------------------------------
 if page == "Home":
-    st.title("Welcome to the NVIDIA Multi-Agent Research Assistant")
+    st.title("Welcome to the Crime Analysis Assistant")
     st.markdown("""
-        This application integrates multiple agents to produce comprehensive research reports on NVIDIA:
-        - **RAG Agent**: Retrieves historical quarterly reports from Pinecone.
-        - **Web Search Agent**: Provides real-time insights via SerpAPI.
-        - **Snowflake Agent**: Queries structured valuation metrics and displays charts.
+        This application integrates multiple agents to analyze crime data:
+        - **RAG Agent**: Retrieves historical crime reports from our database.
+        - **Web Search Agent**: Provides real-time crime statistics via SerpAPI.
+        - **Data Agent**: Queries structured crime metrics and displays charts.
     """)
 
 elif page == "Combined Report":
-    st.title("NVIDIA Research Assistant")
+    st.title("Crime Analysis Assistant")
     st.subheader("💬 Research History")
 
     # Show chat history
@@ -204,7 +204,7 @@ elif page == "Combined Report":
             else:
                 st.markdown(f"""
                     <div class='assistant-message'>
-                        <div class='metadata'>🤖 NVIDIA Research Assistant</div>
+                        <div class='metadata'>🤖 Crime Analysis Assistant</div>
                         <div>{message['content']}</div>
                     </div>
                 """, unsafe_allow_html=True)
@@ -213,7 +213,7 @@ elif page == "Combined Report":
     with st.form("report_form", clear_on_submit=True):
         col1, col2 = st.columns([3, 1])
         with col1:
-            question = st.text_input("Research Question", placeholder="What has driven NVIDIA's revenue growth?")
+            question = st.text_input("Research Question", placeholder="What are the crime trends in New York?")
         with col2:
             submitted = st.form_submit_button("➤")
 
@@ -301,7 +301,7 @@ elif page == "Combined Report":
                             display_web_results(latest.get("web_output"))
 
 elif page == "Map View":
-    st.title("NVIDIA Office Locations")
+    st.title("City Crime Statistics")
     
     # Initialize selected_cities in session state if not present
     if "selected_cities" not in st.session_state:
@@ -333,25 +333,26 @@ elif page == "Map View":
 
     # Display selected cities
     st.write("---")
-    st.subheader("Selected NVIDIA Locations")
+    st.subheader("Selected City Crime Statistics")
     if st.session_state["selected_cities"]:
         for city in st.session_state["selected_cities"]:
             info = cities[city]
             st.write(
                 f"• **{city}** "
                 f"(Population: {info['pop']:,}, "
+                f"Crime Rate: {info['crime_rate']:.1f}/1000, "
                 f"Coordinates: {info['lat']:.4f}, {info['lon']:.4f})"
             )
     else:
         st.info("No locations selected yet. Click a marker on the map to add a location.")
 
 elif page == "About":
-    st.title("About NVIDIA Research Assistant")
+    st.title("About Crime Analysis Assistant")
     st.markdown("""
-        **NVIDIA Multi-Agent Research Assistant** integrates:
-        - **RAG Agent**: Uses Pinecone with metadata filtering to retrieve historical reports.
-        - **Web Search Agent**: Uses SerpAPI for real-time search.
-        - **Snowflake Agent**: Connects to Snowflake for valuation measures and charts.
+        **Crime Analysis Assistant** integrates:
+        - **RAG Agent**: Uses database with metadata filtering to retrieve historical crime reports.
+        - **Web Search Agent**: Uses SerpAPI for real-time crime statistics.
+        - **Data Agent**: Connects to databases for crime metrics and visualization.
     """)
 
 # -------------------------------
@@ -360,7 +361,7 @@ elif page == "About":
 st.markdown("""
 <style>
 /* ---------------------------------- */
-/* Dark background, Nvidia green accent */
+/* Dark background, blue accent */
 /* ---------------------------------- */
 body, .main, [data-testid="stHeader"], [data-testid="stSidebar"] {
     background-color: #1E1E1E !important;
@@ -369,22 +370,22 @@ body, .main, [data-testid="stHeader"], [data-testid="stSidebar"] {
 }
 
 /* ---------------------------------- */
-/* Make links NVIDIA green, no underline */
+/* Make links blue, no underline */
 /* ---------------------------------- */
 a, a:visited {
-    color: #76B900 !important; /* Nvidia green */
+    color: #2196F3 !important; /* blue */
     text-decoration: none !important;
 }
 a:hover {
-    color: #5c8d00 !important; 
+    color: #1976D2 !important; 
     text-decoration: underline !important;
 }
 
 /* ---------------------------------- */
-/* Headings in NVIDIA green */
+/* Headings in blue */
 /* ---------------------------------- */
 h1, h2, h3, h4 {
-    color: #76B900 !important; /* Nvidia Green */
+    color: #2196F3 !important; /* blue */
 }
 
 /* ---------------------------------- */
@@ -437,13 +438,13 @@ h1, h2, h3, h4 {
     min-width: 0;
     font-size: 1.4em;
     font-weight: bold;
-    background-color: #76B900;
+    background-color: #2196F3;
     color: #fff;
     border: none;
     transition: background-color 0.3s ease;
 }
 [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #5c8d00;
+    background-color: #1976D2;
 }
 
 /* ---------------------------------- */
@@ -457,8 +458,8 @@ div[data-testid="stTabs"] button {
     padding: 0.5rem 1rem;
 }
 div[data-testid="stTabs"] button[aria-selected="true"] {
-    background-color: #76B900 !important;
-    color: #000 !important;
+    background-color: #2196F3 !important;
+    color: #fff !important;
     font-weight: bold;
 }
 
@@ -490,15 +491,15 @@ div[data-testid="stTabs"] button[aria-selected="true"] {
 }
 
 /* -------------------------------------- */
-/* Sidebar nav buttons in NVIDIA green   */
+/* Sidebar nav buttons in blue   */
 /* -------------------------------------- */
 [data-testid="stSidebar"] .stButton > button {
-    background-color: #0a8006 !important; /* NVIDIA green */
+    background-color: #2196F3 !important; /* blue */
     color: #fff !important;
     border: none !important;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background-color: #5c8d00 !important; /* darker green hover */
+    background-color: #1976D2 !important; /* darker blue hover */
     color: #fff !important;
 }
 
@@ -506,7 +507,7 @@ div[data-testid="stTabs"] button[aria-selected="true"] {
 /* Agent Selection Submit Button */
 /* ---------------------------------- */
 [data-testid="stButton"] button[kind="primary"] {
-    background-color: #76B900 !important;
+    background-color: #2196F3 !important;
     color: white !important;
     border: none !important;
     padding: 0.5rem 1rem !important;
@@ -515,7 +516,7 @@ div[data-testid="stTabs"] button[aria-selected="true"] {
 }
 
 [data-testid="stButton"] button[kind="primary"]:hover {
-    background-color: #5c8d00 !important;
+    background-color: #1976D2 !important;
 }
 
 /* ---------------------------------- */
