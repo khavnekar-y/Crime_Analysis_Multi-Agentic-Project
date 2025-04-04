@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import json
 import toml
+from streamlit_folium import st_folium
+import folium
 
 # -------------------------------
 # 1) Page Config for Wide Layout
@@ -18,6 +20,16 @@ st.set_page_config(
 config = toml.load("config.toml")
 API_URL = config["fastapi_url"]
 QUERY_URL = f"{API_URL}/research_report"
+
+# Add cities data after the API_URL definition
+cities = {
+    "New York": {"lat": 40.7128, "lon": -74.0060, "pop": 8419600},
+    "San Francisco": {"lat": 37.7749, "lon": -122.4194, "pop": 883305},
+    "Seattle": {"lat": 47.6062, "lon": -122.3321, "pop": 744955},
+    "Los Angeles": {"lat": 34.0522, "lon": -118.2437, "pop": 3980400},
+    "Houston": {"lat": 29.7604, "lon": -95.3698, "pop": 2328000},
+    "Chicago": {"lat": 41.8781, "lon": -87.6298, "pop": 2716000},
+}
 
 # -------------------------------
 # 3) Helper Functions
@@ -143,6 +155,7 @@ if "chat_history" not in st.session_state:
 
 home_btn = st.sidebar.button("Home", key="nav_Home", use_container_width=True)
 report_btn = st.sidebar.button("Combined Report", key="nav_Report", use_container_width=True)
+map_btn = st.sidebar.button("Map View", key="nav_Map", use_container_width=True)
 about_btn = st.sidebar.button("About", key="nav_About", use_container_width=True)
 
 if home_btn:
@@ -150,6 +163,9 @@ if home_btn:
     st.rerun()
 elif report_btn:
     st.session_state.current_page = "Combined Report"
+    st.rerun()
+elif map_btn:
+    st.session_state.current_page = "Map View"
     st.rerun()
 elif about_btn:
     st.session_state.current_page = "About"
@@ -207,8 +223,14 @@ elif page == "Combined Report":
                 "question": question,
                 "search_type": search_type,
                 "selected_periods": selected_periods,
-                "agents": selected_agents
+                "agents": selected_agents,
+                "selected_cities": st.session_state.get("selected_cities", [])
             }
+            
+            # Add debug information
+            with st.expander("🔍 Debug: Request Payload", expanded=False):
+                st.code(json.dumps(payload, indent=2), language='json')
+                
             try:
                 response = requests.post(QUERY_URL, json=payload)
                 if response.status_code == 200:
@@ -277,6 +299,51 @@ elif page == "Combined Report":
                         else:
                             # fallback to the raw chunk
                             display_web_results(latest.get("web_output"))
+
+elif page == "Map View":
+    st.title("NVIDIA Office Locations")
+    
+    # Initialize selected_cities in session state if not present
+    if "selected_cities" not in st.session_state:
+        st.session_state["selected_cities"] = []
+
+    # Create Folium map
+    m = folium.Map(location=[39.8283, -98.5795], zoom_start=4)
+
+    # Add markers for each city
+    for city_name, info in cities.items():
+        folium.Marker(
+            location=[info["lat"], info["lon"]],
+            popup=city_name,
+            tooltip=f"Click for {city_name}",
+        ).add_to(m)
+
+    # Display the map
+    st_map = st_folium(m, width=700, height=500)
+
+    # Handle clicks
+    clicked_city_name = st_map.get("last_object_clicked_popup")
+    if clicked_city_name:
+        if clicked_city_name in cities:
+            if clicked_city_name not in st.session_state["selected_cities"]:
+                st.session_state["selected_cities"].append(clicked_city_name)
+            st.success(f"✅ You selected: {clicked_city_name}")
+        else:
+            st.warning("⚠️ You clicked on the map but missed a valid marker. Try again.")
+
+    # Display selected cities
+    st.write("---")
+    st.subheader("Selected NVIDIA Locations")
+    if st.session_state["selected_cities"]:
+        for city in st.session_state["selected_cities"]:
+            info = cities[city]
+            st.write(
+                f"• **{city}** "
+                f"(Population: {info['pop']:,}, "
+                f"Coordinates: {info['lat']:.4f}, {info['lon']:.4f})"
+            )
+    else:
+        st.info("No locations selected yet. Click a marker on the map to add a location.")
 
 elif page == "About":
     st.title("About NVIDIA Research Assistant")
