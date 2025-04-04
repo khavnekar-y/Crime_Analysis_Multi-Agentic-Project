@@ -322,10 +322,10 @@ class CrimeDataAnalyzer:
                 plt.margins(y=0.2)
                 
                 plt.tight_layout()
-                city_incidents_path = f"top5_incidents_{city}_{timestamp}.png"
+                city_incidents_path = f'top5_incidents_{city.replace(" ", "_")}_{timestamp}.png'
                 plt.savefig(city_incidents_path, dpi=150, bbox_inches='tight')
                 plt.close()
-                visualization_paths[f'top5_incidents_{city}'] = city_incidents_path
+                visualization_paths[f'top5_incidents_{city.replace(" ", "_")}'] = city_incidents_path
 
             # 3. Horizontal Yearly Distribution
             plt.figure(figsize=(12, 15))  # Adjusted for horizontal orientation

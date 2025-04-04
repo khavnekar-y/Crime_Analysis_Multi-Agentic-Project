@@ -138,39 +138,153 @@ class ComparisonAgent:
         )
 
         # Update analyze method in ComparisonAgent class
-    def analyze(self, analysis_request: Dict, comparison_type: str) -> Dict:
-        """Analyze and compare crime data."""
+    def analyze(self, analysis_request, comparison_type="cross_region"):
+        """
+        Analyze crime data and create comparative insights.
+        
+        Args:
+            analysis_request (dict): Request containing data sources
+            comparison_type (str): Type of comparison to perform
+            
+        Returns:
+            dict: Comparison results
+        """
         try:
-            regions = analysis_request["regions"]
-            snowflake_data = analysis_request["snowflake_data"]
+            # Extract data from request
+            regions = analysis_request.get("regions", [])
+            snowflake_data = analysis_request.get("snowflake_data", {})
             rag_data = analysis_request.get("rag_data", {})
+            web_data = analysis_request.get("web_data", {})
             
-            # Get raw analysis
-            if comparison_type == "cross_region":
-                raw_result = self._analyze_cross_region(regions, snowflake_data, rag_data)
-            else:
-                raw_result = self._analyze_temporal(regions[0], snowflake_data, rag_data)
+            # If there's an error in any data source, provide a placeholder comparison
+            if (snowflake_data.get("status") == "failed" or 
+                "error" in rag_data or 
+                "error" in snowflake_data):
+                # Create a basic fallback comparison using whatever data is available
+                return self._generate_fallback_comparison(regions)
                 
-            # Structure the analysis
-            result = self._structure_analysis(raw_result, comparison_type)
-            result.update({
-                "regions": regions,
-                "type": comparison_type
-            })
-            
-            # Store in memory for future reference
-            self.memory.save_context(
-                {"input": f"Analysis for {', '.join(regions)}"},
-                {"output": json.dumps(result)}
-            )
-            
-            return result
+            # Generate comparison based on available data
+            comparison = self._generate_comparison(regions, snowflake_data, rag_data, web_data, comparison_type)
+            return comparison
             
         except Exception as e:
-            print(f"ComparisonAgent analysis error: {str(e)}")
+            print(f"Comparison agent error: {str(e)}")
+            # Return a minimal valid result structure
             return {
-                "error": str(e),
-                "status": "failed"
+                "comparison": f"Unable to generate comparison due to error: {str(e)}. Please check data sources.",
+                "visualizations": [],
+                "status": "error"
+            }
+    def _generate_comparison(self, regions, snowflake_data, rag_data, web_data, comparison_type):
+        """Generate a comprehensive comparison between regions or time periods."""
+        try:
+            # Create a prompt for the comparison based on available data
+            regions_str = ", ".join(regions)
+            
+            # Extract key data points
+            snowflake_analysis = snowflake_data.get("analysis", "No Snowflake analysis available") 
+            if len(snowflake_analysis) > 1000:  # Trim if too long
+                snowflake_analysis = snowflake_analysis[:1000] + "..."
+                
+            rag_insights = rag_data.get("insights", "No historical insights available")
+            if len(rag_insights) > 1000:
+                rag_insights = rag_insights[:1000] + "..."
+                
+            web_report = web_data.get("markdown_report", "No web search data available")
+            if len(web_report) > 1000:
+                web_report = web_report[:1000] + "..."
+            
+            # Determine comparison type and construct prompt
+            if comparison_type == "cross_region" and len(regions) > 1:
+                prompt = f"""
+                Generate a comprehensive comparison of crime patterns between {regions_str}.
+                
+                Data from statistical analysis:
+                {snowflake_analysis}
+                
+                Historical insights:
+                {rag_insights}
+                
+                Web search findings:
+                {web_report}
+                
+                Please provide:
+                1. Direct comparison of crime rates and types between regions
+                2. Regional differences in crime trends
+                3. Socioeconomic or demographic factors that might explain differences
+                4. Policing and prevention strategies that differ between regions
+                5. Which region appears safer overall and why
+                
+                Format your response with clear headings and use markdown formatting.
+                """
+            else:
+                # Temporal comparison for a single region
+                prompt = f"""
+                Generate a comprehensive analysis of crime trends over time for {regions_str}.
+                
+                Data from statistical analysis:
+                {snowflake_analysis}
+                
+                Historical insights:
+                {rag_insights}
+                
+                Web search findings:
+                {web_report}
+                
+                Please provide:
+                1. How crime rates have changed over time
+                2. Key turning points or significant changes in crime patterns
+                3. Factors that might explain these changes
+                4. Whether the overall crime situation is improving or worsening
+                5. Predictions for future trends based on historical patterns
+                
+                Format your response with clear headings and use markdown formatting.
+                """
+            
+            # Get the LLM response
+            llm = llmselection.get_llm(self.model_type)
+            comparison_content = llmselection.get_response(llm, prompt)
+            
+            # Return the comparison data
+            return {
+                "comparison": comparison_content,
+                "visualizations": [],
+                "status": "success"
+            }
+        
+        except Exception as e:
+            print(f"Error generating comparison: {str(e)}")
+            return {
+                "comparison": f"Error generating comparison: {str(e)}",
+                "visualizations": [],
+                "status": "error"
+            }
+        
+        def _generate_fallback_comparison(self, regions):
+            """Generate a fallback comparison when data is insufficient."""
+            region_str = ", ".join(regions)
+            
+            # Generate a basic comparison that acknowledges the data limitations
+            basic_comparison = f"""
+            # Regional Comparison Analysis for {region_str}
+            
+            **Note: This analysis is limited due to data availability issues.**
+            
+            ## Available Information:
+            
+            Based on the limited data available, crime patterns across {region_str} show some variations:
+            
+            - Each region has unique demographic and socioeconomic factors affecting crime rates
+            - Urban density, economic conditions, and policing approaches differ between regions
+            - Historical crime trends suggest regional differences in types and frequencies of incidents
+            
+            More comprehensive analysis would require additional data sources.
+            """
+            
+            return {
+                "comparison": basic_comparison,
+                "visualizations": [],
+                "status": "limited"
             }
 
 

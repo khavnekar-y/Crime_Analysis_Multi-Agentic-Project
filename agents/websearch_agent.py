@@ -33,13 +33,6 @@ DEFAULT_CONFIG = {
 # ---------------------------------------------------------------------------
 # 2. Utility Functions
 # ---------------------------------------------------------------------------
-def get_fallback_images():
-    """Return fallback crime-related image URLs"""
-    return [
-        "https://source.unsplash.com/featured/?police",
-        "https://source.unsplash.com/featured/?crime,scene",
-        "https://source.unsplash.com/featured/?police,car"
-    ]
 
 def format_date_range(start_year, end_year):
     """Format date range for query enhancement"""
@@ -194,6 +187,18 @@ def build_markdown_report(query, search_result, extracts):
     # Get main components from search results
     answer = search_result.get("answer", "No summary provided.")
     items = search_result.get("results", [])
+
+    if "images" in search_result:
+        for img in search_result["images"]:
+            if isinstance(img, dict) and "url" in img:
+                img_url = img["url"]
+                if img_url and img_url.startswith("http"):
+                    all_images.append(img_url)
+    for item in items:
+        if isinstance(item, dict) and "image_url" in item:
+            img_url = item["image_url"]
+            if img_url and img_url.startswith("http"):
+                all_images.append(img_url)
     
     # Build markdown sections
     md_lines = []
@@ -208,15 +213,13 @@ def build_markdown_report(query, search_result, extracts):
     ])
 
     # Add fallback image if needed
-    images_in_report = any(
-        item.get("image_url") for item in items if isinstance(item, dict)
-    )
+    images_in_report = len(all_images) > 0
     if not images_in_report:
-        fallback = get_fallback_images()
-        if fallback:
-            md_lines.append(f"![Crime Scene]({fallback[0]})\n")
-            all_images.append(fallback[0])
-
+        print("No images found in search results.")
+    else:
+        md_lines.append("## Images Found\n")
+        for img_url in all_images:
+            md_lines.append(f"![Image]({img_url})\n")
     # Summary section
     md_lines.extend([
         f"## Summary / Answer\n{answer}\n",
@@ -334,4 +337,6 @@ if __name__ == "__main__":
     print(f"- Full data saved to: crime_report_data.json")
     print(f"- Found {result_data['metadata']['image_count']} images")
     print(f"- Found {result_data['metadata']['link_count']} links")
+    for image in result_data["images"]:
+        print(f"  - Image URL: {image}")
     print("\nDone!")

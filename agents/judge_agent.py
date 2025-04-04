@@ -2,6 +2,7 @@ from langchain.memory import ConversationBufferMemory
 from langchain.agents import initialize_agent, AgentType
 from langchain.tools import Tool
 import json
+import traceback
 from datetime import datetime
 from typing import Dict, List
 from agents.llmselection import LLMSelector as llmselection
@@ -50,42 +51,134 @@ class JudgeAgent:
         # Store feedback history
         self.feedback_history = []
     
-    def evaluate(self, report_data: Dict, state: Dict) -> Dict:
-        """Evaluate report quality and provide feedback."""
+    def evaluate(self, context):
+        """
+        Evaluate a crime report for quality and completeness.
+        
+        Args:
+            context (dict): Evaluation context including report and parameters
+        
+        Returns:
+            dict: Evaluation results including scores and feedback
+        """
         try:
-            # Extract relevant data
-            sections = report_data.get("sections", [])
-            query = state.get("question", "")
+            # Extract report data
+            report = context.get('report', {})
             
-            # Check previous evaluations in memory
-            previous_feedback = self._get_relevant_feedback(state)
-            
-            # Create evaluation context
-            eval_context = {
-                "report": report_data,
-                "query": query,
-                "previous_feedback": previous_feedback,
-                "timestamp": datetime.now().isoformat()
+            # Initialize scores
+            scores = {
+                "completeness": 0,
+                "accuracy": 0,
+                "usefulness": 0,
+                "clarity": 0
             }
             
-            # Store evaluation context in memory
-            self.memory.save_context(
-                {"report": str(eval_context)},
-                {"evaluation": "Starting evaluation..."}
-            )
+            # Check if report has basic structure
+            if not report or not isinstance(report, dict):
+                print("Warning: Invalid report structure")
+                return {
+                    "overall_assessment": "Report evaluation failed due to invalid structure",
+                    "overall_score": 5,
+                    "scores": scores,
+                    "improvement_suggestions": ["Fix report structure"]
+                }
             
-            # Execute evaluation
-            evaluation = self._run_evaluation(eval_context)
+            # Prepare report for evaluation
+            report_title = report.get("title", "Untitled Report")
+            sections = report.get("sections", [])
+            section_titles = [s.get("title", "Untitled Section") for s in sections]
             
-            # Store feedback for future reference
-            self._store_feedback(evaluation, state)
+            # Create a simple evaluation based on report structure
+            section_count = len(sections)
+            has_exec_summary = any("executive" in s.get("title", "").lower() for s in sections)
+            has_methodology = any("methodology" in s.get("title", "").lower() for s in sections)
+            has_analysis = any("analysis" in s.get("title", "").lower() for s in sections)
+            has_recommendations = any("recommend" in s.get("title", "").lower() for s in sections)
             
-            return evaluation
+            # Calculate completeness score
+            completeness = 0
+            if section_count >= 8:
+                completeness = 10
+            elif section_count >= 6:
+                completeness = 8
+            elif section_count >= 4:
+                completeness = 6
+            else:
+                completeness = 4
+                
+            # Adjust for key sections
+            if has_exec_summary:
+                completeness = min(10, completeness + 1)
+            if has_methodology:
+                completeness = min(10, completeness + 1)
+            if has_analysis:
+                completeness = min(10, completeness + 1)
+            if has_recommendations:
+                completeness = min(10, completeness + 1)
+                
+            scores["completeness"] = completeness
             
+            # For other metrics, assign reasonable defaults
+            scores["accuracy"] = 7  # Hard to evaluate without ground truth
+            scores["usefulness"] = 8 if has_recommendations else 6
+            scores["clarity"] = 7  # Default assumption
+            
+            # Calculate overall score
+            overall_score = round(sum(scores.values()) / len(scores))
+            
+            # Generate improvement suggestions
+            suggestions = []
+            if not has_exec_summary:
+                suggestions.append("Add an Executive Summary section")
+            if not has_methodology:
+                suggestions.append("Include a Methodology section")
+            if not has_analysis:
+                suggestions.append("Provide more detailed analysis of crime data")
+            if not has_recommendations:
+                suggestions.append("Include actionable recommendations")
+                
+            if not suggestions:
+                suggestions.append("Consider adding more visualizations to illustrate key points")
+                
+            # Generate overall assessment
+            assessment = f"Report '{report_title}' evaluated with an overall score of {overall_score}/10. "
+            if overall_score >= 8:
+                assessment += "This is a high-quality report with comprehensive coverage of crime analysis."
+            elif overall_score >= 6:
+                assessment += "This is a good report that meets basic requirements but could be improved."
+            else:
+                assessment += "This report needs significant improvements to meet quality standards."
+            
+            # Store feedback without adding a second state parameter
+            self.feedback_history.append({
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "report_title": report_title,
+                "overall_score": overall_score,
+                "improvement_suggestions": suggestions
+            })
+            
+            # Return evaluation results
+            return {
+                "overall_assessment": assessment,
+                "overall_score": overall_score,
+                "scores": scores,
+                "improvement_suggestions": suggestions
+            }
+        
         except Exception as e:
             print(f"JudgeAgent evaluation error: {str(e)}")
-            return self._create_error_response(str(e))
-    
+            traceback.print_exc()
+            return {
+                "overall_assessment": f"Evaluation failed due to error: {str(e)}",
+                "overall_score": 5,
+                "scores": {
+                    "completeness": 5,
+                    "accuracy": 5,
+                    "usefulness": 5,
+                    "clarity": 5
+                },
+                "improvement_suggestions": ["Fix evaluation process"]
+            }    
     def _create_error_response(self, error_message: str) -> Dict:
         """Create standardized error response when evaluation fails."""
         return {
@@ -160,6 +253,26 @@ class JudgeAgent:
             improvements.append(f"Overall score decreased by {previous_score - current_score} points")
             
         return improvements
+    def _create_evaluation_prompt(self,context: Dict) -> str:
+        """Create evaluation prompt template"""
+        report_content = json.dumps(context.get("report", {}), indent=2)[:1500]  # Truncate to avoid token limits
+    
+        eval_prompt = f"""
+        Evaluate this crime analysis report based on:
+        1. Completeness (1-10)
+        2. Accuracy (1-10)
+        3. Usefulness (1-10)
+        4. Clarity (1-10)
+
+        Report Content:
+        {report_content}
+
+        Regions: {", ".join(context.get("regions", []))}
+        Time Period: {context.get("time_period", "")}
+
+        Provide scores and detailed feedback.
+        """
+        return eval_prompt
     
     def _run_evaluation(self, context: Dict) -> Dict:
         """Run the actual evaluation using the agent."""
@@ -167,16 +280,37 @@ class JudgeAgent:
         eval_prompt = self._create_evaluation_prompt(context)
         
         # Get evaluation from agent
-        response = self.agent.run(eval_prompt)
+        try:
+            response = self.agent.run(eval_prompt)
+        except Exception as e:
+            print(f"Agent evaluation error: {str(e)}")
+            response = f"Error evaluating report: {str(e)}"
         
         # Process and structure the response
         try:
             evaluation = json.loads(response)
         except:
-            evaluation = self._create_structured_evaluation(response)
+            evaluation = {
+                "status": "error",
+                "error": "Failed to parse evaluation response",
+                "overall_score": 5,
+                "scores": {
+                    "completeness": 5,
+                    "accuracy": 5, 
+                    "usefulness": 5,
+                    "clarity": 5,
+                    "overall": 5
+                },
+                "feedback": {
+                    "strengths": ["Unable to evaluate due to error"],
+                    "weaknesses": ["Error during evaluation process"],
+                    "improvements": [f"Technical error: {response}"]
+                },
+                "overall_assessment": f"Report evaluation failed due to technical error: {response}",
+                "overall_score": 5
+            }
         
         return evaluation
-    
     def _evaluate_accuracy(self, report_data: Dict) -> Dict:
         """Evaluate factual accuracy of the report."""
         try:
