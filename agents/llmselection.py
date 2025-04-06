@@ -14,7 +14,7 @@ class LLMSelector:
         "Claude 3 Haiku": "claude-3-haiku-20240307",     # Correct Anthropic model name
         "Claude 3 Sonnet": "claude-3-5-sonnet-20240620",   # Correct Anthropic model name
         "Gemini Pro": "gemini-2.0-flash",                      # Correct Google model name
-        "DeepSeek": "deepseek-reasoner",      # Correct DeepSeek model name
+        "DeepSeek": "deepseek-reasoner",      
         "Grok": "grok-2-latest"                              # Correct Grok model name
     }
     
@@ -81,6 +81,29 @@ class LLMSelector:
     def get_available_models() -> Dict[str, str]:
         """Return the list of available models."""
         return LLMSelector.AVAILABLE_MODELS.copy()
+
+    # Update the count_tokens method
+    @staticmethod
+    def count_tokens(text: str, model_name: str) -> int:
+        """Simple token estimation using model-specific ratios."""
+        if not text:
+            return 0
+        
+        # Simplified model ratios
+        ratios = {"claude": 1.4, "gemini": 1.3, "grok": 1.3, "deepseek": 1.3}
+        ratio = ratios.get(next((k for k in ratios if k in model_name.lower()), "gemini"))
+        
+        return int(len(text.split()) * ratio)    
+    @staticmethod
+    def get_token_limits(model_name: str) -> dict:
+        """Get context window and token limits for each model."""
+        return {
+            "Claude 3 Haiku": {"context_window": 200000, "cost_per_1k": 0.25},
+            "Claude 3 Sonnet": {"context_window": 200000, "cost_per_1k": 0.50},
+            "Gemini Pro": {"context_window": 32768, "cost_per_1k": 0.10},
+            "DeepSeek": {"context_window": 32768, "cost_per_1k": 0.25},
+            "Grok": {"context_window": 32768, "cost_per_1k": 0.25}
+        }.get(model_name, {"context_window": 32768, "cost_per_1k": 0.25})
 
 
 

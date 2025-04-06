@@ -44,6 +44,7 @@ from agents.rag_agent import RAGAgent
 # Make sure this is at the top
 from agents.snowflake_utils import CrimeDataAnalyzer, initialize_connections, CrimeReportRequest
 from agents.Comparision_agent import ComparisonAgent
+from agents.forecast_code_agent import ForecastAgent
 from agents.judge_agent import JudgeAgent
 from agents.llmselection import LLMSelector as llmselection
 from dotenv import load_dotenv
@@ -59,8 +60,8 @@ class CrimeReportState(TypedDict, total=False):
     # Input parameters
     question: str  # User's query (removing redundant 'input')
     search_mode: str  # "all_years" or "specific_range"
-    start_year: Optional[int]  # Starting year for analysis
-    end_year: Optional[int]  # Ending year for analysis
+    start_year: Optional[int] 
+    end_year: Optional[int] 
     selected_regions: List[str]  # Cities/regions to analyze
     model_type: str  # LLM model to use
     
@@ -74,7 +75,6 @@ class CrimeReportState(TypedDict, total=False):
     report_sections: Dict[str, Any]  # Structured report sections with content
     visualizations: Dict[str, Any]  # All visualizations from different sources
     contextual_images: Dict[str, Any]  # Contextual images generated for the report
-    previous_feedback: Optional[str]  # Feedback from previous runs for comparison
     safety_assessment: Dict[str, Any]  # Safety assessment results
     
     # Processing metadata
@@ -87,13 +87,8 @@ class CrimeReportState(TypedDict, total=False):
                                  # - visualizations
                                  # - metadata
                                  # - quality assessment
+    token_usage: List[Dict[str, Any]]  # Token usage tracking for each node
     
-    evaluation: Dict[str, Any]  # Combined quality assessment including:
-                               # - judge feedback
-                               # - quality scores
-                               # - improvement suggestions
-                               # - historical feedback
-
 ###############################################################################
 # Node Functions
 ###############################################################################
@@ -184,9 +179,17 @@ def rag_node(state: CrimeReportState) -> Dict:
             end_year=state.get("end_year"),
             selected_regions=state.get("selected_regions", []) 
         )
-        
-        print(f"✅ RAG analysis complete using {result.get('model_used', model_type)}")
-        return {"rag_output": result}
+        usage = track_token_usage(
+            state=state,
+            node_name="rag_analysis",
+            input_text=state["question"],
+            output_text=result.get("insights")
+        )
+
+        print(f"✅ RAG analysis complete using {result.get('model_used', model_type)} , used {usage['total_so_far']} tokens and cost {usage['total_cost_so_far']}$ ")
+        return {
+            "rag_output": result,
+            }
         
     except Exception as e:
         print(f"❌ RAG analysis error: {str(e)}")
@@ -198,38 +201,61 @@ def snowflake_node(state: CrimeReportState) -> Dict:
     try:
         print("\n📊 Analyzing crime data from Snowflake...")
         
-        # Initialize connections with the user-selected model
-        from agents.snowflake_utils import initialize_connections
-        engine, llm = initialize_connections(model_type=state["model_type"])
-        
-        # Initialize the CrimeDataAnalyzer
-        analyzer = CrimeDataAnalyzer(engine, llm)
-        
-        # Import the request model
-        from agents.snowflake_utils import CrimeReportRequest
-        from pydantic import BaseModel
-        
-        # Create the request
+        # Validate regions (new validation)
+        regions = state["selected_regions"]
+        if not regions or regions == [""]:
+            raise ValueError("No valid regions specified")
+            
+        # Create the request with validated regions
         request = CrimeReportRequest(
             question=state["question"],
             search_mode=state["search_mode"],
             start_year=state.get("start_year"),
             end_year=state.get("end_year"),
-            selected_regions=state["selected_regions"],
+            selected_regions=regions, 
             model_type=state["model_type"]
         )
         
-        # Execute the analysis
-        result = analyzer.analyze_crime_data(request)
+        # Initialize connections
+        engine, llm = initialize_connections(model_type=state["model_type"])
+        analyzer = CrimeDataAnalyzer(engine, llm)
         
-        print(f"✅ Snowflake analysis complete - generated {len(result.get('visualizations', {}).get('paths', {}))} visualizations")
-        return {"snowflake_output": result}
-    
+        # Execute analysis with error handling
+        try:
+            result = analyzer.analyze_crime_data(request)
+            # Validate visualization paths
+            if "visualizations" in result and "paths" in result["visualizations"]:
+                paths = result["visualizations"]["paths"]
+                validated_paths = {}
+                for key, path in paths.items():
+                    if os.path.exists(path):
+                        validated_paths[key] = path
+                    else:
+                        print(f"⚠️ Missing visualization: {path}")
+                result["visualizations"]["paths"] = validated_paths
+            
+            usage = track_token_usage(
+                state=state,
+                node_name="snowflake_analysis",
+                input_text=state["question"],
+                output_text=result.get("analysis")
+            ) or {"tokens": 0}  # Provide default if tracking fails
+            
+            print(f"✅ Snowflake analysis complete with {len(result.get('visualizations', {}).get('paths', {}))} visualizations and used {usage['total_so_far']} tokens and {usage['total_cost_so_far']}$")
+            return {"snowflake_output": result}
+            
+        except Exception as e:
+            print(f"❌ Analysis error: {str(e)}")
+            return {"snowflake_output": {
+                "status": "failed",
+                "error": str(e),
+                "analysis": "Analysis failed due to an error"
+            }}
+            
     except Exception as e:
-        print(f"❌ Snowflake analysis error: {str(e)}")
-        traceback.print_exc()
-        return {"snowflake_output": {"error": str(e), "status": "failed"}}
-    
+        print(f"❌ Snowflake node error: {str(e)}")
+        return {"snowflake_output": {"status": "failed", "error": str(e)}}
+        
 def contextual_image_node(state: CrimeReportState) -> Dict:
     """Generate contextual images for the report."""
     try:
@@ -237,8 +263,6 @@ def contextual_image_node(state: CrimeReportState) -> Dict:
         
         # Load environment variables
         load_dotenv()
-        
-        # Configure X.AI client
         XAI_API_KEY = os.getenv("GROK_API_KEY")
         client = OpenAI(base_url="https://api.x.ai/v1", api_key=XAI_API_KEY)
         
@@ -303,9 +327,32 @@ def contextual_image_node(state: CrimeReportState) -> Dict:
                     }
             except Exception as e:
                 print(f"❌ Error generating image for {prompt_data['title']}: {str(e)}")
-        
+        # Track token usage for prompt generation
+        prompt_text = "\n".join([p["prompt"] for p in prompts])
+        usage = track_token_usage(
+            state=state,
+            node_name="contextual_image_generation",
+            input_text=prompt_text,
+            output_text="Image generation output"  # Images don't have output tokens in the same way
+        )
+        tokens_used = usage.get("total_so_far", 0)
+        total_cost = usage.get("total_cost_so_far", 0)
+        # Append image-specific metadata to the usage tracking
+        image_usage = {
+            "image_count": len(contextual_images),
+            "image_generation_model": "grok-2-image-1212",
+            
+            "image_generation_cost": len(contextual_images) * 0.25  # Example cost of $0.25 per image
+        }
+
+        # Update the token usage entry with image-specific information
+        if "token_usage" in state and isinstance(state["token_usage"], list):
+            for usage_entry in state["token_usage"]:
+                if usage_entry.get("node") == "contextual_image_generation":
+                    usage_entry.update(image_usage)
+                    break
         # Print summary
-        print(f"\n✅ Generated {len(contextual_images)} contextual images")
+        print(f"\n✅ Generated {len(contextual_images)} contextual images with {tokens_used} tokens used and {total_cost}$ cost")
         for title, data in contextual_images.items():
             print(f"- {title}: {data['path']}")
             
@@ -337,14 +384,22 @@ def comparison_node(state: CrimeReportState) -> Dict:
         comparison_type = "cross_region" if len(state["selected_regions"]) > 1 else "temporal"
         result = comparison_node.agent.analyze(analysis_request, comparison_type)
         
-        # Store any feedback from previous runs
-        if state.get("previous_feedback"):
-            comparison_node.agent.store_feedback(
-                analysis_id=datetime.now().strftime("%Y%m%d_%H%M%S"),
-                feedback=state["previous_feedback"]
-            )
+        if "snowflake_output" in state and state["snowflake_output"].get("status") == "success":
+            if viz_data := state["snowflake_output"].get("visualizations", {}):
+                result["visualizations"] = {
+                    **{f'top5_incidents_{city.replace(" ", "_")}': viz_data.get("paths", {}).get(f'top5_incidents_{city.replace(" ", "_")}') 
+                       for city in state["selected_regions"]},
+                    "yearly_distribution": viz_data.get("paths", {}).get("yearly_distribution")
+                }
         
-        print(f"✅ Comparison analysis complete - Memory size: {len(comparison_node.agent.memory.chat_memory.messages)} messages")
+        usage  = track_token_usage(
+            state=state,
+            node_name="comparison_analysis",
+            input_text=state["question"],
+            output_text=result.get("comparison")
+        )
+        viz_count = len(result.get("visualizations", {}))
+        print(f"✅ Comparison analysis complete with {viz_count} visualizations,  {usage['total_so_far']} total tokens and {usage['total_cost_so_far']}$ cost")
         return {"comparison_output": result}
         
     except Exception as e:
@@ -354,13 +409,13 @@ def comparison_node(state: CrimeReportState) -> Dict:
             "error": str(e),
             "status": "failed"
         }}
-
+    
 def forecast_node(state: CrimeReportState) -> Dict:
-    """Generate crime trend forecasts for future periods."""
+    """Generate crime trend forecasts for future periods and forecasting code."""
     try:
         print("\n🔮 Generating crime trend forecasts...")
         
-        # Check if we have Snowflake data to work with
+        
         if "snowflake_output" not in state or state["snowflake_output"].get("status") != "success":
             print("⚠️ Skipping forecast - no valid data available")
             return {"forecast_output": {
@@ -368,10 +423,10 @@ def forecast_node(state: CrimeReportState) -> Dict:
                 "reason": "No valid data available for forecasting"
             }}
         
-        # Use the LLM to generate forecasts based on historical data
+        
         llm = llmselection.get_llm(state["model_type"])
         
-        # Extract historical stats from the Snowflake output
+        
         stats = state["snowflake_output"]["statistics"]
         yearly_trends = stats["incident_analysis"]["yearly_trends"]
         
@@ -394,7 +449,7 @@ def forecast_node(state: CrimeReportState) -> Dict:
         Historical Crime Data:
         {trend_data}
         
-        Historical Context (from RAG):
+        Historical Context which shows the summary of the crime that happened(from RAG):
         {rag_insights_sample}
         
         Recent News and Trends (from Web):
@@ -412,27 +467,43 @@ def forecast_node(state: CrimeReportState) -> Dict:
         # Generate forecast
         forecast = llmselection.get_response(llm, forecast_prompt)
         
-        # Create a forecast visualization if possible
-        forecast_viz = generate_forecast_visualization(
-            yearly_trends,
-            state["selected_regions"][0],  
-            f"forecast_crime.png"
+        
+        code_generator = ForecastAgent(model_type=state["model_type"])
+        forecast_data = code_generator.generate_forecast_data(
+            snowflake_data=state["snowflake_output"],
+            rag_data=state.get("rag_output", {}),
+            web_data=state.get("web_output", {}),
+            comparison_data=state.get("comparison_output", {}),
+            regions=state["selected_regions"]
         )
         
+        
         forecast_output = {
-            "forecast": forecast,
-            "visualization": forecast_viz,
+            "forecast": forecast,  
+            "forecast_data": {
+                "historical": forecast_data.get("historical", {}),
+                "forecast": forecast_data.get("forecast", {}),
+                "combined": forecast_data.get("combined", {}),
+                "metadata": forecast_data.get("metadata", {})
+            },
             "status": "success"
         }
         
-        print("✅ Forecast generation complete")
+        usage = track_token_usage(
+            state=state,
+            node_name="forecast_generation",
+            input_text=forecast_prompt,
+            output_text=forecast
+        )
+        tokens_used = usage.get("total_so_far")
+        print(f"Total tokens so far: {tokens_used} and cost {usage['total_cost_so_far']}$")
         return {"forecast_output": forecast_output}
         
     except Exception as e:
         print(f"❌ Forecast generation error: {str(e)}")
         traceback.print_exc()
         return {"forecast_output": {"error": str(e), "status": "failed"}}
-    
+
 
 def safety_assessment_node(state: CrimeReportState) -> Dict:
     """Generate safety assessment and recommendations."""
@@ -468,10 +539,10 @@ def safety_assessment_node(state: CrimeReportState) -> Dict:
         generate a comprehensive safety assessment for {', '.join(state['selected_regions'])}.
         
         Web Search Data:
-        {web_data[:2000]}...
+        {web_data[:1000]}...
         
         Historical Insights:
-        {rag_data[:2000]}
+        {rag_data[:700]}
         
         Statistical Analysis:
         {snowflake_data[:1000]}
@@ -489,8 +560,16 @@ def safety_assessment_node(state: CrimeReportState) -> Dict:
         
         # Generate safety assessment using the agent
         safety_assessment = safety_agent.run(safety_prompt)
+        usage = track_token_usage(
+            state=state,
+            node_name="safety_assessment",
+            input_text=safety_prompt,
+            output_text=safety_assessment
+        )
+        tokens_used = usage.get("tokens", 0)
+        total_cost = usage.get("total_cost_so_far", 0)
         
-        print("✅ Safety assessment complete")
+        print(f"✅ Safety assessment complete with {tokens_used} tokens) and {total_cost}$ cost")
         return {"safety_assessment": safety_assessment}
         
     except Exception as e:
@@ -522,7 +601,6 @@ def report_organization_node(state: CrimeReportState) -> Dict:
                 "title": "Historical Context and Trends",
                 "content": "",
                 "order": 3,
-                "visualizations": [],
                 "images": []
             },
             "current_analysis": {
@@ -547,9 +625,9 @@ def report_organization_node(state: CrimeReportState) -> Dict:
             },
             "forecast": {
                 "title": "Crime Trend Forecast",
-                "content": state.get("forecast_output", {}).get("forecast", ""),
+                "content": state.get("forecast_output", {}).get("forecast"),
+                "dfs": [],
                 "order": 7,
-                "visualizations": [],
                 "images": []
             },
             "recommendations": {
@@ -568,17 +646,14 @@ def report_organization_node(state: CrimeReportState) -> Dict:
             }
         }
         
-        # Begin populating sections with available content
+        
         
         # Historical context from RAG output
         if "rag_output" in state:
             historical_insights = state["rag_output"].get("insights", "")
             report_sections["historical_context"]["content"] = historical_insights
             
-            # Get any historical visualizations
-            if "visualizations" in state["rag_output"]:
-                rag_viz = state["rag_output"].get("visualizations", [])
-                report_sections["historical_context"]["visualizations"] = rag_viz
+    
         
         # Current analysis from Snowflake output
         if "snowflake_output" in state and state["snowflake_output"].get("status") == "success":
@@ -587,17 +662,18 @@ def report_organization_node(state: CrimeReportState) -> Dict:
             
             # Add visualizations
             viz_paths = state["snowflake_output"].get("visualizations", {}).get("paths", {})
-            for viz_type, path in viz_paths.items():
-                report_sections["current_analysis"]["visualizations"].append(path)
+            if all_incidents_path := viz_paths.get("all_incidents_trend"):
+                report_sections["current_analysis"]["visualizations"].append(all_incidents_path)
         
         # Regional comparison from comparison output
         if "comparison_output" in state:
-            comparison = state["comparison_output"].get("comparison", "")
+            comparison = state["comparison_output"].get("comparison")
             report_sections["regional_comparison"]["content"] = comparison
             
             # Add comparison visualizations if any
-            comp_viz = state["comparison_output"].get("visualizations", [])
-            report_sections["regional_comparison"]["visualizations"] = comp_viz
+            comp_viz = state["comparison_output"].get("visualizations", {})
+            report_sections["regional_comparison"]["visualizations"] = list(comp_viz.values())
+
         
         # Safety assessment from safety output
         if "safety_assessment" in state:
@@ -607,11 +683,15 @@ def report_organization_node(state: CrimeReportState) -> Dict:
         if "forecast_output" in state and state["forecast_output"].get("status") == "success":
             forecast = state["forecast_output"].get("forecast", "")
             report_sections["forecast"]["content"] = forecast
+            for key, value in state["forecast_output"].get("forecast_data", {}).items():
+                if key == "historical":
+                    report_sections["forecast"]["dfs"].append(value)
+                elif key == "forecast":
+                    report_sections["forecast"]["dfs"].append(value)
+                elif key == "combined":
+                    report_sections["forecast"]["dfs"].append(value)
+
             
-            # Add forecast visualization
-            forecast_viz = state["forecast_output"].get("visualization")
-            if forecast_viz:
-                report_sections["forecast"]["visualizations"] = [forecast_viz]
         
         # Methodology - standard content based on what was used
         methodology_content = [
@@ -626,8 +706,7 @@ def report_organization_node(state: CrimeReportState) -> Dict:
         ]
         report_sections["methodology"]["content"] = "\n".join(methodology_content)
         
-        # ========== SYNTHESIS: GENERATE MISSING CONTENT ==========
-        # Get the LLM for synthesis of missing content
+    
         llm = llmselection.get_llm(state["model_type"])
         
         # Generate missing content for empty sections
@@ -642,8 +721,16 @@ def report_organization_node(state: CrimeReportState) -> Dict:
                     Include key findings about crime rates, patterns, and notable trends.
                     Focus on the most important insights that a decision-maker would need to know.
                     """
-                    section["content"] = llmselection.get_response(llm, summary_prompt)
-                
+                    executive_summary_content = llmselection.get_response(llm, summary_prompt)
+                    section["content"] = executive_summary_content
+                    token_usage = track_token_usage(
+                        state=state,
+                        node_name="executive_summary",
+                        input_text=summary_prompt,  
+                        output_text=executive_summary_content
+                    )
+                    print(f"✅ Executive summary generated with {token_usage['total_so_far']} tokens and {token_usage['total_cost_so_far']}$ cost")
+
                 elif section_key == "recommendations":
                     # Generate recommendations based on all analyses
                     safety_assessment = state.get("safety_assessment", "")
@@ -663,6 +750,14 @@ def report_organization_node(state: CrimeReportState) -> Dict:
                     Format with clear bullet points and prioritize by potential impact.
                     """
                     section["content"] = llmselection.get_response(llm, recommendations_prompt)
+
+                    token_usage = track_token_usage(
+                        state=state,
+                        node_name="recommendations",
+                        input_text=recommendations_prompt,  
+                        output_text=section["content"]
+                    )
+                    print(f"✅ Recommendations generated with {token_usage['total_so_far']} tokens and {token_usage['total_cost_so_far']}$ cost")
                 
                 elif section_key == "appendix":
                     # Generate appendix content
@@ -674,8 +769,13 @@ def report_organization_node(state: CrimeReportState) -> Dict:
                     4. References
                     """
                     section["content"] = llmselection.get_response(llm, appendix_prompt)
-        
-        # Collect all visualizations for reference
+                    token_usage = track_token_usage(
+                        state=state,
+                        node_name="appendix",
+                        input_text=appendix_prompt,  
+                        output_text=section["content"]
+                    )
+                    print(f"✅ Appendix content generated with {token_usage['total_so_far']} tokens and {token_usage['total_cost_so_far']}$ cost")
         visualizations = {}
         
         # Add Snowflake visualizations
@@ -683,12 +783,7 @@ def report_organization_node(state: CrimeReportState) -> Dict:
             viz_paths = state["snowflake_output"].get("visualizations", {}).get("paths", {})
             for viz_type, path in viz_paths.items():
                 visualizations[f"snowflake_{viz_type}"] = path
-        
-        # Add Forecast visualization
-        if "forecast_output" in state and state["forecast_output"].get("status") == "success":
-            forecast_viz = state["forecast_output"].get("visualization")
-            if forecast_viz:
-                visualizations["forecast"] = forecast_viz
+    
         
         # Add contextual images to appropriate sections
         if "contextual_images" in state and state["contextual_images"]:
@@ -749,87 +844,8 @@ def report_organization_node(state: CrimeReportState) -> Dict:
         return {"report_sections": {}, "visualizations": {}}
         
 
-# def synthesis_node(state: CrimeReportState) -> Dict:
-#     """
-#     Synthesize findings from all sources and populate empty report sections.
-#     """
-#     try:
-#         print("\n🔄 Synthesizing information across all sources...")
-        
-#         # Get existing report sections and visualizations
-#         report_sections = state.get("report_sections", {})
-#         visualizations = state.get("visualizations", {})
-        
-#         # If report_sections is empty, something went wrong
-#         if not report_sections:
-#             print("⚠️ No report sections available - creating default sections")
-#             org_result = report_organization_node(state)
-#             report_sections = org_result.get("report_sections", {})
-#             visualizations = org_result.get("visualizations", {})
-        
-#         # Get the LLM for synthesis
-#         llm = llmselection.get_llm(state["model_type"])
-        
-#         # Only generate content for empty sections
-#         for section_key, section in report_sections.items():
-#             if not section.get("content"):
-#                 print(f"Generating content for {section.get('title')}")
-                
-#                 if section_key == "executive_summary":
-#                     # Create an executive summary based on all available data
-#                     summary_prompt = f"""
-#                     Create a concise executive summary (max 250 words) of the crime analysis report for {', '.join(state['selected_regions'])}. 
-#                     Include key findings about crime rates, patterns, and notable trends.
-#                     Focus on the most important insights that a decision-maker would need to know.
-#                     """
-#                     section["content"] = llmselection.get_response(llm, summary_prompt)
-                
-#                 elif section_key == "recommendations":
-#                     # Generate recommendations based on all analyses
-#                     safety_assessment = state.get("safety_assessment", "")
-#                     forecast = state.get("forecast_output", {}).get("forecast", "")
-                    
-#                     recommendations_prompt = f"""
-#                     Based on the crime data and analysis for {', '.join(state['selected_regions'])}, 
-#                     provide specific, actionable recommendations for:
-#                     1. Law enforcement strategies
-#                     2. Community safety measures
-#                     3. Policy interventions
-                    
-#                     Safety Assessment: {safety_assessment[:500]}...
-                    
-#                     Forecast Insights: {forecast[:500]}...
-                    
-#                     Format with clear bullet points and prioritize by potential impact.
-#                     """
-#                     section["content"] = llmselection.get_response(llm, recommendations_prompt)
-                
-#                 elif section_key == "appendix":
-#                     # Generate appendix content
-#                     appendix_prompt = f"""
-#                     Create a brief appendix section for a crime report including:
-#                     1. Data sources and methodologies
-#                     2. Statistical methods used
-#                     3. Glossary of crime-related terms
-#                     4. References
-#                     """
-#                     section["content"] = llmselection.get_response(llm, appendix_prompt)
-        
-#         print("✅ Content synthesis complete")
-#         return {
-#             "report_sections": report_sections,
-#             "visualizations": visualizations,
-#             "synthesis_complete": True
-#         }
-        
-#     except Exception as e:
-#         print(f"❌ Synthesis error: {str(e)}")
-#         traceback.print_exc()
-#         return {"synthesis_error": str(e)}
-        
-
 def final_report_node(state: CrimeReportState) -> Dict:
-    """Assemble the final report with all sections, visualizations and contextual images."""
+    """Assemble the final report with all sections."""
     try:
         print("\n📊 Generating final crime report...")
         
@@ -838,64 +854,34 @@ def final_report_node(state: CrimeReportState) -> Dict:
         visualizations = state.get("visualizations", {})
         contextual_images = state.get("contextual_images", {})
         
-        # Log for debugging
-        print(f"Found {len(report_sections)} report sections")
+        # Log once
         section_titles = [section.get("title") for section in report_sections.values()]
-        print(f"Section titles: {section_titles}")
+        print(f"Found {len(section_titles)} sections")
         print(f"Found {len(visualizations)} visualizations")
         print(f"Found {len(contextual_images)} contextual images")
-        
-        # Ensure safety assessment is included
-        if "safety_assessment" in state and "safety_assessment" not in report_sections:
-            print("Adding safety assessment to report sections")
-            report_sections["safety_assessment"] = {
-                "title": "Safety Assessment",
-                "content": state["safety_assessment"],
-                "order": 6
-            }
         
         # Create final report structure
         final_report = {
             "title": f"Crime Analysis Report: {', '.join(state['selected_regions'])}",
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "generated_by": os.getenv("USER_NAME", "crime-analysis-system"),
-            "query": state["question"],
-            "parameters": {
-                "regions": state["selected_regions"],
-                "time_period": f"{state.get('start_year', 'all history')} to {state.get('end_year', 'present')}",
-                "model": state["model_type"]
-            },
-            "sections": [],
+            "sections": sorted([section for section in report_sections.values()], 
+                             key=lambda x: x.get("order", 999)),
             "visualizations": list(visualizations.values()) if visualizations else [],
-            "contextual_images": list(contextual_images.values()) if contextual_images else [],
-            "cover_image": None,  # Will be set later if generated
-            "metadata": {
-                "source_count": len(visualizations),
-                "word_count": sum(len(section.get("content", "").split()) 
-                               for section in report_sections.values() 
-                               if isinstance(section.get("content", ""), str)),
-                "section_count": len(report_sections)
-            }
+            "contextual_images": list(contextual_images.values()) if contextual_images else []
         }
         
-        # Add sections in correct order
-        ordered_sections = sorted(
-            [section for section in report_sections.values()],
-            key=lambda x: x.get("order", 999)
-        )
-        
-        # Generate a sample cover image with title
-        cover_image_path = generate_report_cover(
+        # Generate cover
+        if cover_image_path := generate_report_cover(
             title=final_report["title"],
             regions=state["selected_regions"],
-            time_period=final_report["parameters"]["time_period"]
-        )
-        
-        if cover_image_path:
+            time_period=f"{state['start_year']} to {state['end_year']}" if state.get("search_mode") == "specific_range" else "all years"
+        ):
             final_report["cover_image"] = cover_image_path
             print(f"✅ Cover image generated: {cover_image_path}")
         
-        final_report["sections"] = ordered_sections
+        
+        
+        
         
         return {"final_report": final_report}
         
@@ -905,12 +891,9 @@ def final_report_node(state: CrimeReportState) -> Dict:
         return {"final_report": {
             "error": str(e),
             "title": "ERROR: Report Generation Failed",
-            "sections": [{
-                "title": "Error Details",
-                "content": str(e)
-            }]
+            "sections": [{"title": "Error Details", "content": str(e)}]
         }}
-        
+            
 def judge_node(state: CrimeReportState) -> Dict:
     """Evaluate report quality using JudgeAgent with memory."""
     try:
@@ -918,7 +901,11 @@ def judge_node(state: CrimeReportState) -> Dict:
         
         # Get or create judge agent
         if not hasattr(judge_node, 'agent'):
-            judge_node.agent = JudgeAgent(model_type=state["model_type"])
+            model_type = state["model_type"]
+            judge_node.agent = JudgeAgent(model_type=model_type)
+            print(f"Judge agent initialized with model: {model_type}")
+        if "final_report" not in state:
+            raise ValueError("Final report not found in state")
         
         # Create evaluation context
         evaluation_context = {
@@ -927,21 +914,30 @@ def judge_node(state: CrimeReportState) -> Dict:
             'time_period': f"{state.get('start_year', 'all history')} to {state.get('end_year', 'present')}"
         }
         
-        # Execute evaluation
         evaluation = judge_node.agent.evaluate(evaluation_context)
+        if not evaluation:
+            raise ValueError("Evaluation failed or returned no results")
         
         # Make sure feedback_history exists
         if not hasattr(judge_node.agent, 'feedback_history'):
             judge_node.agent.feedback_history = []
         
-        print(f"✅ Report evaluation complete - Overall score: {evaluation.get('overall_score', 'N/A')}/10")
+        usage = track_token_usage(
+            state=state,
+            node_name="report_evaluation",
+            input_text=str(evaluation_context),
+            output_text=str(evaluation)
+        )
+        tokens_used = usage.get("tokens", 0)
+        print(f"✅ Report evaluation complete with {tokens_used} tokens and {usage['cost']}$ cost")
+        print(f"📝 Evaluation feedback: {evaluation.get('feedback', 'No feedback provided')}")
         print(f"📝 Stored {len(judge_node.agent.feedback_history)} previous evaluations")
         
         evaluation_data = {
             "judge_feedback": evaluation,
             "quality_scores": evaluation.get("scores", {}),
             "improvement_suggestions": evaluation.get("improvement_suggestions", []),
-            "feedback_history": judge_node.agent.feedback_history[-5:]  # Last 5 evaluations
+            "feedback_history": judge_node.agent.feedback_history[-5:] 
         }
         
         # Include evaluation in the final report for storage
@@ -957,161 +953,125 @@ def judge_node(state: CrimeReportState) -> Dict:
             "judge_feedback": {"error": str(e)},
             "quality_scores": {"overall": 5}
         }
-        if "final_report" in state:
-            state["final_report"]["evaluation"] = error_data
-            
-        return error_data
+        
     
 ###############################################################################
 # Helper Functions for Visualization
 ###############################################################################
-def generate_forecast_visualization(yearly_trends, region: str, output_path: str) -> str:
-    """Generate a forecast visualization extending the current trends."""
+def track_token_usage(state: CrimeReportState, node_name: str, input_text: str, output_text: str) -> Dict:
+    """Track token usage for each node and maintain running totals with pricing."""
     try:
-        print(f"Generating forecast visualization for {region}...")
+        model_name = state["model_type"]
         
-        # Extract relevant data
-        if not yearly_trends or not isinstance(yearly_trends, dict):
-            print("No valid yearly trends data for forecast visualization")
-            return ""
-            
-        # Get years and values
-        years = []
-        values = []
+        # Calculate tokens
+        input_tokens = llmselection.count_tokens(input_text, model_name)
+        output_tokens = llmselection.count_tokens(output_text, model_name)
+        total_tokens = input_tokens + output_tokens
         
-        # Format may vary, try to extract data safely
-        if isinstance(yearly_trends, dict):
-            for year_str, data in yearly_trends.items():
-                try:
-                    # Only process if year is numeric
-                    year = int(year_str)
-                    
-                    # Extract total crime count for the year
-                    if isinstance(data, dict):
-                        total = 0
-                        for incident_type, count in data.items():
-                            # Skip non-numeric incident types and "all incidents"
-                            if isinstance(incident_type, str) and incident_type.strip().lower() == 'all incidents':
-                                continue
-                                
-                            try:
-                                # Try to convert to number
-                                if isinstance(count, (int, float)):
-                                    total += count
-                                else:
-                                    total += float(count)
-                            except (ValueError, TypeError):
-                                # Skip if conversion fails
-                                continue
-                        
-                        if total > 0:  # Only add if we have valid data
-                            years.append(year)
-                            values.append(total)
-                    elif isinstance(data, (int, float)):
-                        years.append(year)
-                        values.append(data)
-                        
-                except (ValueError, TypeError):
-                    # Skip non-numeric years
-                    continue
+        # Get model limits and pricing
+        model_info = llmselection.get_token_limits(model_name)
+        cost_per_1k = model_info["cost_per_1k"]
+        context_window = model_info["context_window"]
         
-        if len(years) < 2:
-            print("Not enough data points for forecast (need at least 2 years)")
-            return ""
+        # Calculate cost
+        cost = (total_tokens / 1000) * cost_per_1k
         
-        # Sort data by year
-        sorted_data = sorted(zip(years, values))
-        years = [y for y, v in sorted_data]
-        values = [v for y, v in sorted_data]
+        # Initialize token tracking if not present
+        if "token_usage" not in state:
+            state["token_usage"] = {
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "by_node": {},
+                "model_used": {
+                    "name": model_name,
+                    "context_window": context_window,
+                    "cost_per_1k": cost_per_1k
+                }
+            }
         
-        print(f"Processed data: {len(years)} years with valid data")
+        # Initialize node if not present
+        if node_name not in state["token_usage"]["by_node"]:
+            state["token_usage"]["by_node"][node_name] = {
+                "tokens": 0,
+                "cost": 0.0
+            }
         
-        # Create the forecast (simple linear regression)
-        # Convert to numpy arrays
-        x = np.array(years, dtype=float)
-        y = np.array(values, dtype=float)
+        # Update node usage
+        state["token_usage"]["by_node"][node_name]["tokens"] += total_tokens
+        state["token_usage"]["by_node"][node_name]["cost"] += cost
         
-        # Perform linear regression
-        slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+        # Update total usage
+        state["token_usage"]["total_tokens"] += total_tokens
+        state["token_usage"]["total_cost"] += cost
         
-        # Generate future years (5 years into the future)
-        future_years = list(range(max(years) + 1, max(years) + 6))
-        
-        # Predict future values
-        future_values = [max(0, slope * year + intercept) for year in future_years]
-        
-        # Plot the data with consistent color theme
-        plt.figure(figsize=(12, 6))
-        
-        # Use a consistent color palette based on the region
-        region_colors = {
-            'Chicago': '#1f77b4',  # blue
-            'New York': '#ff7f0e',  # orange
-            'Los Angeles': '#2ca02c',  # green
-            'default': '#d62728'  # red
+        return {
+            "node": node_name,
+            "tokens": total_tokens,
+            "cost": cost,
+            "total_so_far": state["token_usage"]["total_tokens"],
+            "total_cost_so_far": state["token_usage"]["total_cost"],
+            "model_info": {
+                "name": model_name,
+                "context_window": context_window,
+                "cost_per_1k": cost_per_1k
+            }
         }
         
-        hist_color = region_colors.get(region, region_colors['default'])
-        
-        # Historical data
-        plt.plot(years, values, marker='o', color=hist_color, linewidth=2, 
-                 label=f'Historical Data ({region})')
-        
-        # Forecast
-        plt.plot(future_years, future_values, 'r--o', linewidth=2, label='Forecast')
-        
-        # Add confidence interval
-        plt.fill_between(
-            future_years, 
-            [max(0, val * 0.8) for val in future_values],  # Lower bound (80% of prediction)
-            [val * 1.2 for val in future_values],  # Upper bound (120% of prediction)
-            color='red', alpha=0.2, label='Forecast Range (±20%)'
-        )
-        
-        # Improve styling
-        plt.title(f'Crime Trend Forecast for {region}', fontsize=16, pad=20)
-        plt.xlabel('Year', fontsize=14)
-        plt.ylabel('Number of Incidents', fontsize=14)
-        plt.grid(True, alpha=0.3, linestyle='--')
-        
-        # Add data labels to historical points
-        for i, (x_val, y_val) in enumerate(zip(years, values)):
-            plt.annotate(f'{int(y_val):,}', 
-                        xy=(x_val, y_val),
-                        xytext=(0, 10),
-                        textcoords='offset points',
-                        ha='center',
-                        fontsize=9)
-        
-        # Add data labels to forecast points
-        for i, (x_val, y_val) in enumerate(zip(future_years, future_values)):
-            plt.annotate(f'{int(y_val):,}', 
-                        xy=(x_val, y_val),
-                        xytext=(0, 10),
-                        textcoords='offset points',
-                        ha='center',
-                        fontsize=9)
-        
-        # Add a watermark/footer with generation details
-        plt.figtext(0.99, 0.01, f"Generated: {datetime.now().strftime('%Y-%m-%d')}", 
-                   fontsize=8, ha='right', color='gray', alpha=0.7)
-        
-        plt.legend(fontsize=12)
-        plt.tight_layout()
-        
-        # Save the figure
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        print(f"✅ Forecast visualization saved to {output_path}")
-        return output_path
-        
     except Exception as e:
-        print(f"Error generating forecast visualization: {str(e)}")
-        traceback.print_exc()
-        return ""
-        
+        print(f"Error tracking tokens: {str(e)}")
+        return {
+            "node": node_name,
+            "tokens": 0,
+            "cost": 0.0,
+            "total_so_far": 0,
+            "total_cost_so_far": 0.0,
+            "model_info": None,
+            "error": str(e)
+        }
 
+
+
+def generate_section_content(state: CrimeReportState, llm: Any, section_key: str, section: Dict, prompt: str) -> str:
+    """Generate content for a report section and track token usage."""
+    try:
+        content = llmselection.get_response(llm, prompt)
+        usage = track_token_usage(
+            state=state,
+            node_name=f"report_section_{section_key}",
+            input_text=prompt,
+            output_text=content
+        )
+        print(f"Generated {section['title']} content ({usage['total_tokens']} tokens)")
+        return content
+    except Exception as e:
+        print(f"Error generating {section_key} content: {str(e)}")
+        return f"Error generating content: {str(e)}"
+
+
+def embed_image_as_base64(image_path: str) -> Optional[str]:
+    """Convert image to base64 string with proper error handling and format detection."""
+    try:
+        if not os.path.exists(image_path):
+            print(f"⚠️ Image file not found: {image_path}")
+            return None
+
+        with open(image_path, "rb") as image_file:
+            # Read image content
+            image_content = image_file.read()
+            
+            # Detect image format
+            img = Image.open(BytesIO(image_content))
+            img_format = img.format.lower() if img.format else 'png'
+            
+            # Convert to base64
+            encoded_string = base64.b64encode(image_content).decode("utf-8")
+            return f"data:image/{img_format};base64,{encoded_string}"
+            
+    except Exception as e:
+        print(f"❌ Error embedding image {image_path}: {str(e)}")
+        return None
+
+# Then modify the markdown generation part in final_report_node:
 def generate_report_cover(title: str, regions: List[str], time_period: str) -> str:
     """Generate a cover image for the report with title and key info."""
     try:
@@ -1166,26 +1126,12 @@ def generate_report_cover(title: str, regions: List[str], time_period: str) -> s
         return ""
     
 
-
-
 ###############################################################################
 # Pipeline Building
 ###############################################################################
 def build_pipeline():
-    """Build and compile the pipeline for crime report generation with parallel processing."""
-    if not hasattr(build_pipeline, 'llm_cache'):
-        build_pipeline.llm_cache = {}
-    
+    """Build and compile the pipeline."""
     try:
-        graph = StateGraph(CrimeReportState)
-        
-        # def get_cached_llm(state):
-        #     """Get a cached LLM instance or create a new one."""
-        #     model_type = state.get("model_type")
-        #     if model_type not in build_pipeline.llm_cache:
-        #         build_pipeline.llm_cache[model_type] = llmselection.get_llm(model_type)
-        #     return build_pipeline.llm_cache[model_type]
-        
         graph = StateGraph(CrimeReportState)
         def parallel_data_gathering(state: CrimeReportState) -> Dict:
             """Execute web search, RAG, and snowflake analysis in parallel."""
@@ -1213,61 +1159,42 @@ def build_pipeline():
         graph.add_node("forecast", forecast_node)
         graph.add_node("safety", safety_assessment_node)
         graph.add_node("contextual_img", contextual_image_node)
-        graph.add_node("organization", report_organization_node)  # Now includes synthesis
+        graph.add_node("organization", report_organization_node)
         graph.add_node("report_generation", final_report_node)
         graph.add_node("judge", judge_node)
         
         # Set entry point
         graph.set_entry_point("start")
 
-        # Define edge conditions and add edges
-        print("🔀 Configuring streamlined pipeline flow...")
-        
-        # Start -> Parallel Gathering
+        # Define linear flow with completion checks
+        def is_complete(state: Dict, key: str) -> bool:
+            return key in state and state[key] is not None
+
+        # Start -> Parallel Gathering (unconditional)
         graph.add_edge("start", "parallel_gathering")
 
         # Parallel Gathering -> Contextual Images
         graph.add_conditional_edges(
             "parallel_gathering",
-            lambda x: all(k in x for k in ["snowflake_output", "rag_output", "web_output"]),
-            {True: "contextual_img", False: "contextual_img"}  # Continue even if some data is missing
+            lambda x: is_complete(x, "snowflake_output"),
+            {True: "contextual_img"}
         )
 
-        # Contextual Images -> Comparison
+        # Rest of the pipeline in linear order
         graph.add_edge("contextual_img", "comparison")
-
-        # Comparison -> Forecast
         graph.add_edge("comparison", "forecast")
-
-        # Forecast -> Safety Assessment
         graph.add_edge("forecast", "safety")
-
-        # Safety Assessment -> Organization (which now includes synthesis)
         graph.add_edge("safety", "organization")
-
-        # Organization -> Report Generation (directly)
-        graph.add_conditional_edges(
-            "organization",
-            lambda x: x.get("synthesis_complete", False),
-            {True: "report_generation"}
-        )
-
-        # Report Generation -> Judge
-        graph.add_conditional_edges(
-            "report_generation",
-            lambda x: "final_report" in x,
-            {True: "judge"}
-        )
-
-        # Judge -> END
+        graph.add_edge("organization", "report_generation")
+        graph.add_edge("report_generation", "judge")
         graph.add_edge("judge", END)
 
-        print("✅ Streamlined pipeline build complete")
         return graph.compile()
+        
     except Exception as e:
         print(f"❌ Error building pipeline: {str(e)}")
-        traceback.print_exc()
         return None
+    
 
 ###############################################################################
 # Main Invocation
@@ -1276,129 +1203,113 @@ def cleanup_matplotlib():
     """Clean up matplotlib resources"""
     plt.close('all')
 
-if __name__ == "__main__":
+def generate_markdown_report(final_report: Dict, md_filename: str) -> None:
     try:
-        # Build the crime report pipeline
-        pipeline = build_pipeline()
-        
-        # Default query
-        default_query = "Analyze recent criminal incidents trends and patterns"
-        
-        # Get user input or use default
-        print("\n🔍 Crime Report Generator 🔍")
-        print("============================")
-        query = input(f"Enter your query [press Enter for default: '{default_query}']: ")
-        if not query:
-            query = default_query
-        
-        # Get regions
-        regions_input = input("Enter regions to analyze (comma-separated) [default: Chicago, New York]: ")
-        regions = [r.strip() for r in regions_input.split(",")] if regions_input else ["Chicago", "New York"]
-        
-        # Get time range
-        time_range = input("Enter time range (all_years/specific_range) [default: specific_range]: ")
-        time_range = time_range if time_range else "specific_range"
-        
-        start_year = None
-        end_year = None
-        if time_range == "specific_range":
-            start_year_input = input("Enter start year [default: 2015]: ")
-            start_year = int(start_year_input) if start_year_input else 2015
+        # Validate input
+        if not isinstance(final_report, dict):
+            raise ValueError(f"Expected dict for final_report, got {type(final_report)}")
             
-            end_year_input = input("Enter end year [default: 2024]: ")
-            end_year = int(end_year_input) if end_year_input else 2024
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(md_filename) or '.', exist_ok=True)
         
-        # Get model
-        model_input = input("Enter LLM model (Claude 3 Haiku/Claude 3 Sonnet/Gemini Pro) [default: Claude 3 Haiku]: ")
-        model = model_input if model_input else "Claude 3 Haiku"
+        with open(md_filename, "w", encoding="utf-8") as f:
+            # Write metadata with null checks
+            f.write("\n".join([
+                "---",
+                f"title: {final_report.get('title', 'Crime Report')}",
+                f"date: {final_report.get('generated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}",
+                "---\n\n"
+            ]))
+            if cover_path := final_report.get('cover_image'):
+                if os.path.exists(cover_path):
+                    if cover_data := embed_image_as_base64(cover_path):
+                        f.write(f"![Cover Image]({cover_data})\n\n")
+                    else:
+                        print("⚠️ Failed to embed cover image")
+
+            # Write sections with validation
+            sections = final_report.get("sections", [])
+            if not sections:
+                f.write("No sections found in report.\n\n")
+            
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                    
+                title = section.get("title", "Untitled Section")
+                content = section.get("content", "No content available.")
+                
+                f.write(f"## {title}\n\n")
+                f.write(f"{content}\n\n")
+                
+                # Handle visualizations with validation
+                for viz in section.get("visualizations", []) or []:
+                    if not viz:
+                        continue
+                    if isinstance(viz, str):
+                        if viz.startswith(('http://', 'https://')):
+                            f.write(f"![Visualization]({viz})\n\n")
+                        elif os.path.exists(viz):
+                            if img_data := embed_image_as_base64(viz):
+                                f.write(f"![Visualization]({img_data})\n\n")
+                
+                # Handle images with validation
+                for img in section.get("images", []) or []:
+                    if not isinstance(img, dict):
+                        continue
+                    path = img.get("path")
+                    if path and os.path.exists(path):
+                        if img_data := embed_image_as_base64(path):
+                            f.write(f"![{img.get('description', 'Image')}]({img_data})\n\n")
+
+            # Write token usage with validation
+            if usage := final_report.get("token_usage"):
+                f.write(f"\n## Token Usage\n")
+                f.write(f"- Total Tokens: {usage.get('total_tokens', 0):,}\n")
+                f.write(f"- Total Cost: ${usage.get('total_cost', 0):.2f}\n\n")
+
+    except Exception as e:
+        print(f"❌ Error generating markdown: {str(e)}")
+
+def main():
+    try:
+        if not (pipeline := build_pipeline()):
+            raise Exception("Pipeline build failed")
+
+        # Get and validate regions input
+        regions_input = input("Regions (comma-separated) [default: Chicago, New York]: ").strip()
+        regions = [r.strip() for r in regions_input.split(",")] if regions_input else ["Chicago", "New York"]
+        regions = [r for r in regions if r]  
         
-        # Initialize state
-        initial_state = {
-            "question": query,
-            "search_mode": time_range,
-            "start_year": start_year,
-            "end_year": end_year,
+        if not regions:
+            regions = ["Chicago", "New York"]
+            print("⚠️ Using default regions: Chicago, New York")
+
+        # Execute pipeline with validated regions
+        result = pipeline.invoke({
+            "question": "Analyze recent criminal incidents trends and patterns",
+            "search_mode": "specific_range",
+            "start_year": 2015,
+            "end_year": 2024,
             "selected_regions": regions,
-            "model_type": model,
+            "model_type": "Gemini Pro",
             "chat_history": [],
             "intermediate_steps": []
-        }
-        
-        print("\n🚀 Starting analysis pipeline...")
-        result = pipeline.invoke(initial_state)
-        
-        # Display results
-        print("\n✅ Analysis Complete!")
-        
-        final_report = result.get("final_report", {})
-        print(f"\n📊 Report: {final_report.get('title', 'No title')}")
-        print(f"📊 Sections: {len(final_report.get('sections', []))}")
-        print(f"📊 Visualizations: {len(final_report.get('visualizations', []))}")
-        
-        # Save report to JSON file
-        output_filename = f"crime_report.json"
-        with open(output_filename, "w", encoding="utf-8") as f:
-            json.dump(final_report, f, indent=2)
-        
-        print(f"\n💾 Full report saved to: {output_filename}")
-        
-        # Save markdown version
-        md_filename = output_filename.replace(".json", ".md")
-        with open(md_filename, "w", encoding="utf-8") as f:
-            # Add cover image if available
-            if final_report.get("cover_image"):
-                f.write(f"![Cover](./{final_report.get('cover_image')})\n\n")
-            
-            f.write(f"# {final_report.get('title', 'Crime Report')}\n\n")
-            f.write(f"Generated at: {final_report.get('generated_at')}\n\n")
-            
-            for section in final_report.get('sections', []):
-                f.write(f"## {section.get('title', 'Section')}\n\n")
-                f.write(f"{section.get('content', '')}\n\n")
-                
-                # Add visualizations if any
-                if "visualizations" in section and section["visualizations"]:
-                    f.write("### Visualizations\n\n")
-                    for viz in section["visualizations"]:
-                        if isinstance(viz, str):
-                            if viz.startswith("http"):
-                                f.write(f"![Visualization]({viz})\n\n")
-                            else:
-                                f.write(f"![Visualization](./{viz})\n\n")
-                
-                # Add images if any (from contextual images)
-                if "images" in section and section["images"]:
-                    f.write("### Illustrative Images\n\n")
-                    for img in section["images"]:
-                        if isinstance(img, dict) and "path" in img:
-                            img_path = img["path"]
-                            img_desc = img.get("description", "Contextual image")
-                            if img_path.startswith("http"):
-                                f.write(f"![{img_desc}]({img_path})\n\n")
-                            else:
-                                f.write(f"![{img_desc}](./{img_path})\n\n")
-                
-            # Add any contextual images that weren't assigned to sections
-            if final_report.get("contextual_images"):
-                f.write("## Additional Contextual Images\n\n")
-                for img in final_report.get("contextual_images", []):
-                    if isinstance(img, dict) and "path" in img:
-                        img_path = img["path"]
-                        img_desc = img.get("description", "Contextual image")
-                        f.write(f"![{img_desc}](./{img_path})\n\n")
-        
-        print(f"📝 Markdown report saved to: {md_filename}")
-        
-        # Show quality feedback
-        if "judge_feedback" in result and "overall_assessment" in result["judge_feedback"]:
-            print("\n⚖️ Quality Assessment:")
-            print(f"Overall: {result['judge_feedback'].get('overall_score', 'N/A')}/10")
-            print(f"Assessment: {result['judge_feedback'].get('overall_assessment')[:100]}...")
-        cleanup_matplotlib()
+        })
+
+        # Generate report
+        md_filename = f"crime_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        generate_markdown_report(result.get("final_report"), md_filename)
+        print(f"\n✅ Report generated: {md_filename}")
+        return 0
+
     except Exception as e:
-        print(f"\n❌ Error running pipeline: {str(e)}")
+        print(f"\n❌ Error: {str(e)}")
         traceback.print_exc()
+        return 1
+
     finally:
-        # Cleanup matplotlib resources
         cleanup_matplotlib()
-        print("\n🧹 Cleaned up resources.")
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -48,7 +48,6 @@ class RAGAgent:
         self.model_name = model_name
         print(f"Initializing RAG Agent with model: {self.model_name}")
         
-        # Initialize the LLM
         self.llm = llmselection.get_llm(self.model_name)
         
         # Define the analysis prompt

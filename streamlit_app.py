@@ -5,6 +5,7 @@ import toml
 from streamlit_folium import st_folium
 import folium
 import os
+import sys
 import time
 import base64
 from datetime import datetime
@@ -115,12 +116,10 @@ def handle_combined_report():
         generate_report(question)
 
 def generate_report(question):
-    """Handle report generation and display"""
-    progress_placeholder = st.empty()
-    
+    """Handle report generation, forecast visualization and display"""
     with st.spinner("🔄 Generating report..."):
         try:
-            # Prepare payload
+            # Prepare request payload
             payload = {
                 "question": question,
                 "search_mode": "all_years" if st.session_state.search_type == "All Years" else "specific_range",
@@ -130,180 +129,131 @@ def generate_report(question):
                 "model_type": st.session_state.selected_model
             }
 
-            # Send request
+            # Initiate report generation
             response = requests.post(QUERY_URL, json=payload)
             if response.status_code != 200:
                 st.error(f"❌ API Error: {response.status_code}")
                 return
 
+            # Get report ID and status URL
             data = response.json()
             report_id = data["report_id"]
             status_url = data.get("status_url", f"/report_status/{report_id}")
-
-            # Show progress with actual status polling
-            with progress_placeholder:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                for i in range(60):  # Maximum 60 seconds wait time
-                    # Get current status
-                    status_response = requests.get(f"{API_URL}{status_url}")
-                    if status_response.status_code == 200:
-                        status_data = status_response.json()
-                        if status_data["status"] == "completed":
-                            progress_bar.progress(100)
-                            status_text.write("✅ Report completed!")
-                            break
-                        elif status_data["status"] == "failed":
-                            st.error(f"Report generation failed: {status_data.get('error', 'Unknown error')}")
-                            return
-                        else:
-                            # Still processing - calculate progress based on time
-                            progress_value = min(5 + i * 1.5, 95)  # Cap at 95%
-                            progress_bar.progress(int(progress_value))
-                            status_text.write(f"⏳ Processing report... ({int(progress_value)}%)")
-                    else:
-                        status_text.write(f"⚠️ Status check failed: {status_response.status_code}")
+            
+            # Display progress
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Poll for status until completion or timeout
+            for i in range(60):  # Maximum 60 seconds wait
+                status_response = requests.get(f"{API_URL}{status_url}")
+                if status_response.status_code != 200:
+                    continue
                     
-                    time.sleep(1)
+                status_data = status_response.json()
+                if status_data["status"] == "completed":
+                    progress_bar.progress(100)
+                    status_text.write("✅ Report completed!")
+                    break
+                elif status_data["status"] == "failed":
+                    st.error(f"Report generation failed: {status_data.get('error', 'Unknown error')}")
+                    return
                 else:
-                    st.warning("⚠️ Report generation is taking longer than expected. Results will appear when ready.")
-
-            # Get report content and judge metrics
+                    progress = min(5 + i * 1.5, 95)  # Cap at 95%
+                    progress_bar.progress(int(progress))
+                    status_text.write(f"⏳ Processing report... ({int(progress)}%)")
+                
+                time.sleep(1)
+            else:
+                st.warning("⚠️ Report generation is taking longer than expected. Results will appear when ready.")
+            
+            # Get the completed report
             report_response = requests.get(f"{API_URL}/report/{report_id}")
-            if report_response.status_code == 200:
-                try:
-                    # First try to parse as JSON (in case API response format changes)
-                    report_data = report_response.json()
-                    content = report_data.get("content", "")
-                    judge_score = report_data.get("judge_score", 0)
-                    judge_feedback = report_data.get("judge_feedback", {})
-                except json.JSONDecodeError:
-                    # Handle as plain text/markdown if not JSON
-                    content = report_response.text
-                    
-                    # Get judge metrics from status endpoint instead
-                    status_response = requests.get(f"{API_URL}/report_status/{report_id}")
-                    if status_response.status_code == 200:
-                        status_data = status_response.json()
-                        judge_score = status_data.get("judge_score", 0)
-                        judge_feedback = status_data.get("judge_feedback", {})
-                        
-                        # Try to get evaluation data if available
-                        if "evaluation" in status_data:
-                            judge_feedback = status_data["evaluation"].get("judge_feedback", judge_feedback)
-                    else:
-                        judge_score = 0
-                        judge_feedback = {}
+            if report_response.status_code != 200:
+                st.error(f"❌ Failed to retrieve report: {report_response.status_code}")
+                return
+                
+            # Display report content
+            content = report_response.text
+            
+            # Get evaluation data
+            status_response = requests.get(f"{API_URL}/report_status/{report_id}")
+            if status_response.status_code == 200:
+                status_data = status_response.json()
+                evaluation = status_data.get("evaluation", {})
                 
                 # Store report in session state
                 st.session_state.reports[report_id] = {
                     "content": content,
-                    "judge_score": judge_score,
-                    "judge_feedback": judge_feedback,
+                    "evaluation": evaluation,
                     "timestamp": datetime.now().isoformat(),
                     "question": question,
                     "selected_regions": st.session_state["selected_cities"],
                     "model": st.session_state.selected_model
                 }
                 
-                # Process markdown sections
+                # Process and display the markdown content
                 sections = content.split('\n')
                 current_text = []
                 
                 for line in sections:
                     if line.startswith('!['):
-                        # If we have accumulated text, display it
                         if current_text:
                             st.markdown('\n'.join(current_text))
                             current_text = []
                         
-                        # Handle image
                         try:
                             img_path = line.split('](')[1].split(')')[0]
                             if img_path.startswith('./'):
                                 img_path = img_path[2:]
                             if os.path.exists(img_path):
                                 st.image(img_path, use_column_width=True)
-                            else:
-                                st.warning(f"Image not found: {img_path}")
-                        except Exception as img_error:
-                            st.error(f"Error displaying image: {img_error}")
+                        except Exception:
+                            pass
                     else:
                         current_text.append(line)
                 
-                # Display any remaining text
                 if current_text:
                     st.markdown('\n'.join(current_text))
                 
-                # Display metrics and provide download in a cleaner layout
-                col1, col2, col3 = st.columns([2, 2, 1])
                 
-                with col1:
-                    with st.expander("📊 Quality Metrics", expanded=True):
-                        st.markdown(f"**Overall Score**: {judge_score:.1f}/10")
-                        scores = judge_feedback.get("scores", {})
-                        if not scores and isinstance(judge_feedback, dict):
-                            # Try other possible key structures
-                            scores = {k: v for k, v in judge_feedback.items() 
-                                     if isinstance(v, (int, float)) and k != "overall_score"}
-                        
-                        for metric, score in scores.items():
-                            st.markdown(f"- **{metric.capitalize()}**: {score:.1f}/10")
-                
-                with col2:
-                    with st.expander("💡 Improvement Suggestions", expanded=True):
-                        suggestions = judge_feedback.get("improvement_suggestions", [])
-                        if suggestions:
-                            for suggestion in suggestions:
-                                st.markdown(f"- {suggestion}")
+                cols = st.columns(2)
+                with cols[0]:
+                    st.download_button(
+                        label="📥 Download Report",
+                        data=content,
+                        file_name=f"crime_report_{datetime.fromisoformat(report_data.get('timestamp', '')).strftime('%Y%m%d_%H%M%S')}.md",
+                        mime="text/markdown"
+                    )
+                with cols[1]:
+                    if st.button("Show Forecast Graph"):
+                        # Extract forecast section from the final report
+                        final_report = st.session_state.reports[report_id].get("final_report", {})
+                        forecast_section = final_report.get("forecast", {})
+                        dfs_list = forecast_section.get("dfs", [])
+                        if dfs_list:
+                            import pandas as pd
+                            for i, df_data in enumerate(dfs_list):
+                                df_forecast = pd.DataFrame(df_data)
+                                if not df_forecast.empty:
+                                    st.subheader(f"Forecast Dataframe {i+1}")
+                                    st.line_chart(df_forecast)
+                                else:
+                                    st.warning(f"Forecast dataframe {i+1} is empty.")
                         else:
-                            st.markdown("No specific suggestions provided.")
-                
-                with col3:
-                    # Use the raw markdown content directly for download
-                    try:
-                        # Get the report content directly from the API
-                        download_response = requests.get(f"{API_URL}/report/{report_id}")
-                        
-                        if download_response.status_code == 200:
-                            # Use the raw response text
-                            report_md = download_response.text
-                        else:
-                            # Fallback to the local version
-                            report_md = create_downloadable_report(st.session_state.reports[report_id])
-                        
-                        # Use download button
-                        st.download_button(
-                            label="📥 Download",
-                            data=report_md,
-                            file_name=f"crime_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                            mime="text/markdown"
-                        )
-                    except Exception as e:
-                        st.error(f"Error preparing download: {str(e)}")
-                
-                # Remove redundant "View Detailed Quality Metrics" button
-                # The metrics are already shown in the expander above
-                st.write("") # Add some spacing
-                st.info("💡 View more detailed metrics in the Judge Metrics tab")
+                            st.warning("No forecast data available.")
 
-            else:
-                st.error(f"❌ Failed to retrieve report: {report_response.status_code}")
-                
+            
         except Exception as e:
-            st.error(f"❌ Error generating report: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
-        finally:
-            # Clean up progress display
-            progress_placeholder.empty()
-
+            st.error(f"❌ Error: {str(e)}")
+        
+        # Clear the progress display
+        st.empty()
+        
 def create_download_link(report_id):
     """Create a download link for base64-encoded markdown report"""
     download_url = f"{API_URL}/download_report/{report_id}"
     return f'<a href="{download_url}" target="_blank" download="crime_report_{report_id}.md">Download Report with Images</a>'
-
 # Add this helper function in the Helper Functions section
 def poll_report_status(report_id: str, status_url: str) -> dict:
     """Simple polling with fixed delay"""
@@ -334,6 +284,7 @@ search_type = st.sidebar.radio(
     ["All Years", "Specific Year Range"],
     key="search_type"
 )
+
 
 
 
@@ -422,6 +373,7 @@ report_btn = st.sidebar.button("Combined Report", key="nav_Report", on_click=nav
 map_btn = st.sidebar.button("Map View", key="nav_Map", on_click=nav_to, args=["Map View"], use_container_width=True)
 judge_btn = st.sidebar.button("Judge Metrics", key="nav_Judge", on_click=nav_to, args=["Judge Metrics"], use_container_width=True)
 about_btn = st.sidebar.button("About", key="nav_About", on_click=nav_to, args=["About"], use_container_width=True)
+token_btn = st.sidebar.button("Token Usage", key="nav_Token", on_click=nav_to, args=["Token Usage"], use_container_width=True)
 
 page = st.session_state.current_page
 
@@ -657,6 +609,20 @@ elif page == "Judge Metrics":
                         if prev_judge_feedback:
                             st.subheader("Judge Feedback")
                             st.json(prev_judge_feedback)
+
+elif page == "Token Usage":
+    st.title("Token Usage Summary")
+    if st.session_state.reports:
+        for rep_id, rep_data in st.session_state.reports.items():
+            st.subheader(f"Report ID: {rep_id}")
+            token_summary = rep_data.get("token_usage_summary")
+            if token_summary:
+                st.json(token_summary)
+            else:
+                st.info("No token usage data available for this report.")
+    else:
+        st.info("No reports available yet.")
+
 
 elif page == "About":
     st.title("About Crime Analysis Assistant")

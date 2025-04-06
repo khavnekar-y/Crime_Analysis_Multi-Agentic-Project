@@ -11,7 +11,7 @@ import sys
 import json
 from datetime import datetime
 # Adjust the path to access your pipeline
-from langGraph.pipeline import build_pipeline
+from langGraph.pipeline import build_pipeline,generate_markdown_report
 from agents.llmselection import LLMSelector
 
 # Create a reports directory if it doesn't exist
@@ -107,9 +107,7 @@ class ReportStatus(BaseModel):
     """Status of the report generation"""
     report_id: str
     status: str
-    judge_score: Optional[float] = None
-    judge_feedback: Optional[Dict] = None  # Add judge_feedback field
-    evaluation: Optional[Dict] = None      # Add full evaluation data
+    evaluation: Optional[Dict] = None      
     markdown_url: Optional[str] = None
 
 # ---------------------------
@@ -129,6 +127,7 @@ async def generate_report(request: CrimeReportRequest):
     
         # Start async processing
     async def process_report():
+        """Process report generation asynchronously"""
         try:
             # Build and run the pipeline
             pipeline = build_pipeline()
@@ -144,61 +143,47 @@ async def generate_report(request: CrimeReportRequest):
             })
             
             final_report = result.get("final_report", {})
-            judge_feedback = result.get("judge_feedback", {})
             
+            # Extract forecast code
+            forecast_code = final_report.get("forecast_output", {}).get("forecast_code")
+            forecast_code_path = final_report.get("forecast_output", {}).get("forecast_code_path")
+            if forecast_code and not forecast_code_path:
+                forecast_code_path = f"{report_id}_forecast_code.py"
+                with open(forecast_code_path, "w") as f:
+                    f.write(forecast_code)
+            
+            # Generate markdown using pipeline's function
             md_filename = f"{report_id}.md"
-            with open(md_filename, "w", encoding="utf-8") as f:
-                # Write cover image
-                if final_report.get("cover_image"):
-                    f.write(f"![Cover]({final_report.get('cover_image')})\n\n")
-                
-                # Write title and date
-                f.write(f"# {final_report.get('title', 'Crime Report')}\n\n")
-                f.write(f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                
-                # Write each section with its images
-                for section in final_report.get('sections', []):
-                    f.write(f"## {section.get('title', '')}\n\n")
-                    f.write(f"{section.get('content', '')}\n\n")
-                    
-                    if section.get("visualizations"):
-                        for viz in section["visualizations"]:
-                            f.write(f"![Visualization]({viz})\n\n")
-                    
-                    if section.get("images"):
-                        for img in section["images"]:
-                            if isinstance(img, dict) and "path" in img:
-                                f.write(f"![{img.get('description', 'Image')}]({img['path']})\n\n")
-                
-                # Write any remaining contextual images
-                if final_report.get("contextual_images"):
-                    f.write("## Additional Images\n\n")
-                    for img in final_report["contextual_images"]:
-                        if isinstance(img, dict) and "path" in img:
-                            f.write(f"![{img.get('description', 'Image')}]({img['path']})\n\n")
+            generate_markdown_report(final_report, md_filename)
             
-            # Get judge feedback
+            # Create downloadable version with base64 images
+            download_filename = f"download_{report_id}.md"
+            with open(md_filename, 'r', encoding='utf-8') as f:
+                content = f.read()
+            processed_content = process_markdown_with_base64_images(content, report_id)
+            with open(download_filename, 'w', encoding='utf-8') as f:
+                f.write(processed_content)
+            
             evaluation = final_report.get("evaluation", {})
-            judge_score = evaluation.get("judge_feedback", {}).get("overall_score", 0)
-            judge_feedback = evaluation.get("judge_feedback", {})
             
-            # Simple status update
+            # Update report status
             reports[report_id] = {
                 "report_id": report_id,
                 "status": "completed",
-                "judge_score": float(judge_score),
-                "judge_feedback": judge_feedback, # Store full feedback
                 "report_file": md_filename,
-                "evaluation": evaluation # Store full evaluation data
+                "download_file": download_filename,
+                "evaluation": evaluation,
+                "forecast_code_path": forecast_code_path,
+                "forecast_code": forecast_code
             }
-            
+                
         except Exception as e:
-            print(f"Error: {str(e)}")
-            reports[report_id] = {
-                "report_id": report_id,
+            print(f"Error processing report: {str(e)}")
+            reports[report_id].update({
                 "status": "failed",
                 "error": str(e)
-            }
+            })
+        
     
     # Start processing in background
     import asyncio
@@ -206,6 +191,32 @@ async def generate_report(request: CrimeReportRequest):
     
     # Return immediately with the report ID
     return {"report_id": report_id, "status_url": f"/report_status/{report_id}"}
+
+@app.get("/forecast_code/{report_id}")
+async def get_forecast_code(report_id: str):
+    """Get the forecast code for a report"""
+    if report_id not in reports:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    if reports[report_id]["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Report not ready")
+    
+    if "forecast_code" in reports[report_id]:
+        return Response(
+            content=reports[report_id]["forecast_code"],
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename=crime_forecast_{report_id}.py"}
+        )
+    elif "forecast_code_path" in reports[report_id]:
+        path = reports[report_id]["forecast_code_path"]
+        if os.path.exists(path):
+            return FileResponse(
+                path,
+                media_type="text/plain",
+                filename=f"crime_forecast_{report_id}.py"
+            )
+    
+    raise HTTPException(status_code=404, detail="Forecast code not found")
 
 @app.get("/download_report/{report_id}")
 async def download_report(report_id: str):
@@ -230,29 +241,20 @@ async def download_report(report_id: str):
     raise HTTPException(status_code=404, detail="Downloadable report file not found")
 
 
-
-
 @app.get("/report_status/{report_id}", response_model=ReportStatus)
 async def get_report_status(report_id: str):
     """Get the status of a report"""
     if report_id not in reports:
         raise HTTPException(status_code=404, detail="Report not found")
     
-    # Ensure all required fields are present in the response
-    report_data = dict(reports[report_id])  # Create a copy to avoid modifying the original
+    report_data = dict(reports[report_id])
     
-    # Make sure the report_id is included
-    report_data["report_id"] = report_id
-    
-    # Add judge feedback to status response if it exists
-    if "judge_feedback" in report_data:
-        report_data["judge_feedback"] = report_data["judge_feedback"]
-    
-    # Add the markdown URL if the report is completed
+    # Add markdown URL if report is completed
     if report_data.get("status") == "completed" and "report_file" in report_data:
         report_data["markdown_url"] = f"/report/{report_id}"
     
     return ReportStatus(**report_data)
+
 @app.get("/report/{report_id}")
 async def get_report(report_id: str):
     """Get the markdown report for viewing (without base64 images)"""
@@ -287,8 +289,4 @@ async def get_available_models():
     available_models = LLMSelector.get_available_models()
     return {
         "models": list(available_models.keys())
-    }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    }    

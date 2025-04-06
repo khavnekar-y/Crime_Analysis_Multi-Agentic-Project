@@ -89,7 +89,7 @@ class CrimeDataAnalyzer:
                 city,
                 zipcode,
                 SUM(value) as incident_count
-            FROM CLEAN_CRIME_DATASET 
+            FROM CLEANED_CRIME_DATASET
             WHERE 1=1
         """
         
@@ -229,19 +229,20 @@ class CrimeDataAnalyzer:
 
     def generate_visualization(self, df: pd.DataFrame, request: CrimeReportRequest) -> dict:
         """Generate separate visualizations for different aspects of crime data."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        visualization_paths = {}
+        paths = {}
+        comparison_paths = {}
         
         try:
             plt.style.use('default')
             colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
 
-            # 1. All Incidents Over Time (New visualization)
+            # 1. Total Crime Incidents by City Over Time
             plt.figure(figsize=(15, 8))
             
             for city in request.selected_regions:
                 city_data = df[df['CITY'] == city]
-                all_incidents = city_data[city_data['INCIDENT'] == ' all incidents'].groupby('YEAR')['INCIDENT_COUNT'].sum()
+                # Sum all incident counts for each year, rather than looking for 'all incidents'
+                all_incidents = city_data.groupby('YEAR')['INCIDENT_COUNT'].sum()
                 
                 plt.plot(all_incidents.index, all_incidents.values,
                         marker='o',
@@ -249,14 +250,14 @@ class CrimeDataAnalyzer:
                         linewidth=2,
                         markersize=8)
                 
-                # Add value labels with better spacing
-                for x, y in zip(all_incidents.index, all_incidents.values):
-                    plt.annotate(f'{int(y):,}',
-                            xy=(x, y),
-                            xytext=(0, 10),
-                            textcoords='offset points',
-                            ha='center',
-                            fontsize=9)
+                # If you still want numeric labels on this chart, uncomment the annotation below.
+                # for x, y in zip(all_incidents.index, all_incidents.values):
+                #     plt.annotate(f'{int(y):,}',
+                #                  xy=(x, y),
+                #                  xytext=(0, 10),
+                #                  textcoords='offset points',
+                #                  ha='center',
+                #                  fontsize=9)
 
             plt.title('Total Crime Incidents by City Over Time', fontsize=16, pad=20)
             plt.xlabel('Year', fontsize=14)
@@ -267,25 +268,28 @@ class CrimeDataAnalyzer:
             plt.margins(y=0.1)
             
             plt.tight_layout()
-            all_incidents_path = f"all_incidents_trend.png"
+            all_incidents_path = "all_incidents_trend.png"
             plt.savefig(all_incidents_path, dpi=150, bbox_inches='tight')
             plt.close()
-            visualization_paths['all_incidents_trend'] = all_incidents_path
+            paths['all_incidents_trend'] = all_incidents_path
 
-            # 2. Top 5 Incidents by City (Improved version)
+            # 2. Top 5 Incidents by City (Remove numeric labels on lines)
             for city in request.selected_regions:
                 plt.figure(figsize=(15, 8))
                 
                 # Filter data for current city
                 city_df = df[df['CITY'] == city]
                 
-                # Get top 5 incidents (excluding 'all incidents')
-                top_5_incidents = (city_df[city_df['INCIDENT'] != ' all incidents']
-                                .groupby('INCIDENT')['INCIDENT_COUNT']
-                                .sum()
-                                .sort_values(ascending=False)
-                                .head(5)
-                                .index)
+                # Get top 5 incidents (excluding 'all incidents' if it exists in your data)
+                # If you do not have 'all incidents' at all, just remove that filter
+                top_5_incidents = (
+                    city_df[city_df['INCIDENT'] != 'all incidents']
+                    .groupby('INCIDENT')['INCIDENT_COUNT']
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(5)
+                    .index
+                )
                 
                 # Create separate trends for each incident
                 for idx, incident in enumerate(top_5_incidents):
@@ -294,22 +298,22 @@ class CrimeDataAnalyzer:
                     plt.plot(incident_data.index, 
                             incident_data.values,
                             marker='o',
-                            label=incident.strip(),  # Remove leading/trailing spaces
+                            label=incident.strip(),
                             color=colors[idx],
                             linewidth=2,
                             markersize=6)
                     
-                    # Add labels with alternating positions
-                    for x, y in zip(incident_data.index, incident_data.values):
-                        if y > 0:  # Only show labels for non-zero values
-                            y_offset = 10 if idx % 2 == 0 else -15
-                            plt.annotate(f'{int(y):,}',
-                                    xy=(x, y),
-                                    xytext=(0, y_offset),
-                                    textcoords='offset points',
-                                    ha='center',
-                                    va='bottom' if y_offset > 0 else 'top',
-                                    fontsize=8)
+                    # *** Remove the annotations here ***
+                    # for x, y in zip(incident_data.index, incident_data.values):
+                    #     if y > 0:
+                    #         y_offset = 10 if idx % 2 == 0 else -15
+                    #         plt.annotate(f'{int(y):,}',
+                    #                      xy=(x, y),
+                    #                      xytext=(0, y_offset),
+                    #                      textcoords='offset points',
+                    #                      ha='center',
+                    #                      va='bottom' if y_offset > 0 else 'top',
+                    #                      fontsize=8)
 
                 plt.title(f'Top 5 Crime Types - {city}', fontsize=16, pad=20)
                 plt.xlabel('Year', fontsize=14)
@@ -321,14 +325,14 @@ class CrimeDataAnalyzer:
                 # Add more space for labels
                 plt.margins(y=0.2)
                 
-                plt.tight_layout()
                 city_incidents_path = f'top5_incidents_{city.replace(" ", "_")}.png'
+                plt.tight_layout()
                 plt.savefig(city_incidents_path, dpi=150, bbox_inches='tight')
                 plt.close()
-                visualization_paths[f'top5_incidents_{city.replace(" ", "_")}'] = city_incidents_path
+                comparison_paths[f'top5_incidents_{city.replace(" ", "_")}'] = city_incidents_path
 
             # 3. Horizontal Yearly Distribution
-            plt.figure(figsize=(12, 15))  # Adjusted for horizontal orientation
+            plt.figure(figsize=(12, 15))
             
             # Prepare data
             yearly_city_totals = df.pivot_table(
@@ -339,62 +343,45 @@ class CrimeDataAnalyzer:
             ).fillna(0)
             
             # Create horizontal stacked bars
-            yearly_city_totals.plot(kind='barh', 
-                                stacked=True,
-                                color=colors[:len(request.selected_regions)])
+            yearly_city_totals.plot(
+                kind='barh',
+                stacked=True,
+                color=colors[:len(request.selected_regions)]
+            )
             
             plt.title('Yearly Crime Distribution by City', fontsize=16, pad=20)
             plt.xlabel('Number of Incidents', fontsize=14)
             plt.ylabel('Year', fontsize=14)
             
-            # Position legend outside the plot
-            plt.legend(title='Cities',
-                    bbox_to_anchor=(1.05, 1),
-                    loc='upper left',
-                    fontsize=10)
-            
+            plt.legend(title='Cities', bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
             plt.grid(True, alpha=0.3, linestyle='--')
             
-            # Add total values at the end of each bar
+            # Add total values at the end of each bar (optional; remove if you don't want these)
             totals = yearly_city_totals.sum(axis=1)
             for i, total in enumerate(totals):
                 plt.text(total, i, f'  {int(total):,}',
                         va='center',
                         fontsize=9)
             
-            # Adjust layout
             plt.tight_layout()
-            distribution_path = f"yearly_distribution.png"
+            distribution_path = "yearly_distribution.png"
             plt.savefig(distribution_path, dpi=150, bbox_inches='tight')
             plt.close()
-            visualization_paths['yearly_distribution'] = distribution_path
+            comparison_paths['yearly_distribution'] = distribution_path
 
             return {
                 "status": "success",
-                "paths": visualization_paths,
+                "paths": paths,
+                "comparison_paths": comparison_paths,
                 "metadata": {
                     "generated_at": self.current_time,
                     "generated_by": self.current_user,
                     "selected_regions": request.selected_regions,
-                    "year_range": f"{request.start_year}-{request.end_year}" if request.search_mode == "specific_range" else "all years",
-                    "total_incidents": int(df['INCIDENT_COUNT'].sum()),
-                    "unique_incident_types": len(df['INCIDENT'].unique()),
-                    "top_5_incidents_by_city": {
-                        city: list(
-                            df[df['CITY'] == city]
-                            .groupby('INCIDENT')['INCIDENT_COUNT']
-                            .sum()
-                            .sort_values(ascending=False)
-                            .head(5)
-                            .index
-                        ) for city in request.selected_regions
-                    }
-                },
-                "descriptions": {
-                    "all_incidents_trend": "Line graph showing total incidents over time for each city",
-                    **{f'top5_incidents_{city}': f"Line graph showing top 5 crime types for {city}" 
-                    for city in request.selected_regions},
-                    "yearly_distribution": "Horizontal stacked bar chart showing yearly crime distribution by city"
+                    "year_range": (
+                        f"{request.start_year}-{request.end_year}" 
+                        if request.search_mode == "specific_range" 
+                        else "all years"
+                    )
                 }
             }
 
@@ -417,6 +404,7 @@ class CrimeDataAnalyzer:
                 }
             }
 
+    
     def create_analysis_context(self, request: CrimeReportRequest, stats: dict, df: pd.DataFrame) -> str:
         """Create detailed context for LLM analysis focusing on incidents."""
         try: 
@@ -503,20 +491,32 @@ class CrimeDataAnalyzer:
 def initialize_connections(model_type=None):
     """Initialize database and LLM connections."""
     try:
-        engine = create_engine(
-            f"snowflake://{os.environ.get('SNOWFLAKE_USER')}:{os.environ.get('SNOWFLAKE_PASSWORD')}"
-            f"@{os.environ.get('SNOWFLAKE_ACCOUNT')}/{os.environ.get('SNOWFLAKE_DATABASE')}/"
-            f"{os.environ.get('SNOWFLAKE_SCHEMA')}?warehouse={os.environ.get('SNOWFLAKE_WAREHOUSE')}"
-        )
+        # Get Snowflake credentials from environment variables
+        user = os.getenv('SNOWFLAKE_USER')
+        password = os.getenv('SNOWFLAKE_PASSWORD')
+        account = os.getenv('SNOWFLAKE_ACCOUNT')
+        database = os.getenv('SNOWFLAKE_DATABASE')
+        schema = os.getenv('SNOWFLAKE_SCHEMA')
+        warehouse = os.getenv('SNOWFLAKE_WAREHOUSE')
+
+        # Verify that all required environment variables are set
+        if not all([user, password, account]):
+            print("Error: Missing required Snowflake credentials in .env file")
+            raise ValueError("Missing Snowflake credentials")
+
+        # Create engine with database, schema and warehouse if available
+        connection_string = f'snowflake://{user}:{password}@{account}/'
+        if database and schema and warehouse:
+            connection_string += f'{database}/{schema}?warehouse={warehouse}'
         
-        # Initialize with default model
+        engine = create_engine(connection_string)
+        
         llm = llmselection.get_llm(model_type)
         
         return engine, llm
     except Exception as e:
         print(f"Error initializing connections: {str(e)}")
         raise
-
 
 if __name__ == "__main__":
     import json

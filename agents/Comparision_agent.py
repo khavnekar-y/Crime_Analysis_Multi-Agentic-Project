@@ -72,7 +72,7 @@ class ComparisonAgent:
             verbose=True
         )
         
-        self.feedback_history = []
+        
 
     def _analyze_crime_trends(self, data: dict) -> str:
         """Tool for analyzing crime trends in the data."""
@@ -121,21 +121,7 @@ class ComparisonAgent:
         
         return self.agent.run(prompt)
 
-    def store_feedback(self, analysis_id: str, feedback: dict) -> None:
-        """Store feedback for improving future analyses."""
-        feedback_entry = {
-            "analysis_id": analysis_id,
-            "timestamp": datetime.now().isoformat(),
-            "feedback": feedback,
-            "model_type": self.model_type
-        }
-        self.feedback_history.append(feedback_entry)
-        
-        # Add feedback to conversation memory
-        self.memory.save_context(
-            {"input": "Analysis Feedback"},
-            {"output": f"Feedback received: {json.dumps(feedback)}"}
-        )
+    
 
         # Update analyze method in ComparisonAgent class
     def analyze(self, analysis_request, comparison_type="cross_region"):
@@ -172,83 +158,95 @@ class ComparisonAgent:
             # Return a minimal valid result structure
             return {
                 "comparison": f"Unable to generate comparison due to error: {str(e)}. Please check data sources.",
-                "visualizations": [],
                 "status": "error"
             }
     def _generate_comparison(self, regions, snowflake_data, rag_data, web_data, comparison_type):
         """Generate a comprehensive comparison between regions or time periods."""
         try:
-            # Create a prompt for the comparison based on available data
-            regions_str = ", ".join(regions)
+            # Extract statistics from snowflake_data
+            stats = snowflake_data.get("statistics", {})
+            total_incidents = stats.get("total_incidents", 0)
+            yearly_average = stats.get("yearly_average", 0)
+            years_analyzed = stats.get("years_analyzed", [])
+            incident_analysis = stats.get("incident_analysis", {})
             
-            # Extract key data points
-            snowflake_analysis = snowflake_data.get("analysis", "No Snowflake analysis available") 
-            if len(snowflake_analysis) > 1000:  # Trim if too long
-                snowflake_analysis = snowflake_analysis[:1000] + "..."
-                
-            rag_insights = rag_data.get("insights", "No historical insights available")
-            if len(rag_insights) > 1000:
-                rag_insights = rag_insights[:1000] + "..."
-                
+            # Create statistics summary
+            stats_summary = f"""
+            Statistical Overview:
+            - Total Incidents: {total_incidents:,}
+            - Yearly Average: {yearly_average:.2f}
+            - Years Analyzed: {min(years_analyzed)} to {max(years_analyzed)}
+            
+            Top Incidents:
+            {json.dumps(incident_analysis.get("top_incidents", {}), indent=2)}
+            
+            Growth Rates:
+            {json.dumps(incident_analysis.get("growth_rates", {}), indent=2)}
+            """
+            
+            # Extract other data
+            snowflake_analysis = snowflake_data.get("analysis", "No Snowflake analysis available")
+            rag_insights = rag_data.get("insights", "No historical insights available")[:1000]
             web_report = web_data.get("markdown_report", "No web search data available")
-            if len(web_report) > 1000:
-                web_report = web_report[:1000] + "..."
             
-            # Determine comparison type and construct prompt
+            # Create comparison prompt based on type
             if comparison_type == "cross_region" and len(regions) > 1:
                 prompt = f"""
-                Generate a comprehensive comparison of crime patterns between {regions_str}.
+                Generate a comprehensive comparison of crime patterns between {', '.join(regions)}.
                 
-                Data from statistical analysis:
+                {stats_summary}
+                
+                Statistical Analysis:
                 {snowflake_analysis}
                 
-                Historical insights:
+                Historical Context:
                 {rag_insights}
                 
-                Web search findings:
+                Recent Findings:
                 {web_report}
                 
                 Please provide:
-                1. Direct comparison of crime rates and types between regions
-                2. Regional differences in crime trends
-                3. Socioeconomic or demographic factors that might explain differences
-                4. Policing and prevention strategies that differ between regions
-                5. Which region appears safer overall and why
+                1. Statistical comparison between regions (use the provided numbers)
+                2. Trend analysis based on the growth rates
+                3. Regional variations in top incident types
+                4. Year-over-year changes and patterns
+                5. Overall safety comparison with supporting data
                 
                 Format your response with clear headings and use markdown formatting.
                 """
             else:
-                # Temporal comparison for a single region
+                # Similar prompt for temporal analysis but focused on time trends
                 prompt = f"""
-                Generate a comprehensive analysis of crime trends over time for {regions_str}.
+                Generate a comprehensive analysis of crime trends over time for {', '.join(regions)}.
                 
-                Data from statistical analysis:
+                {stats_summary}
+                
+                Statistical Analysis:
                 {snowflake_analysis}
                 
-                Historical insights:
+                Historical Context:
                 {rag_insights}
                 
-                Web search findings:
+                Recent Findings:
                 {web_report}
                 
                 Please provide:
-                1. How crime rates have changed over time
-                2. Key turning points or significant changes in crime patterns
-                3. Factors that might explain these changes
-                4. Whether the overall crime situation is improving or worsening
-                5. Predictions for future trends based on historical patterns
+                1. Statistical trend analysis using the provided numbers
+                2. Growth rate patterns and significant changes
+                3. Evolution of top incident types over time
+                4. Year-by-year statistical comparison
+                5. Data-backed future projections
                 
                 Format your response with clear headings and use markdown formatting.
                 """
             
-            # Get the LLM response
+            # Get comparison content
             llm = llmselection.get_llm(self.model_type)
             comparison_content = llmselection.get_response(llm, prompt)
             
-            # Return the comparison data
             return {
                 "comparison": comparison_content,
-                "visualizations": [],
+                "statistics": stats,  # Include statistics in the response
                 "status": "success"
             }
         
@@ -256,36 +254,35 @@ class ComparisonAgent:
             print(f"Error generating comparison: {str(e)}")
             return {
                 "comparison": f"Error generating comparison: {str(e)}",
-                "visualizations": [],
                 "status": "error"
             }
         
-        def _generate_fallback_comparison(self, regions):
-            """Generate a fallback comparison when data is insufficient."""
-            region_str = ", ".join(regions)
-            
-            # Generate a basic comparison that acknowledges the data limitations
-            basic_comparison = f"""
-            # Regional Comparison Analysis for {region_str}
-            
-            **Note: This analysis is limited due to data availability issues.**
-            
-            ## Available Information:
-            
-            Based on the limited data available, crime patterns across {region_str} show some variations:
-            
-            - Each region has unique demographic and socioeconomic factors affecting crime rates
-            - Urban density, economic conditions, and policing approaches differ between regions
-            - Historical crime trends suggest regional differences in types and frequencies of incidents
-            
-            More comprehensive analysis would require additional data sources.
-            """
-            
-            return {
-                "comparison": basic_comparison,
-                "visualizations": [],
-                "status": "limited"
-            }
+    def _generate_fallback_comparison(self, regions):
+        """Generate a fallback comparison when data is insufficient."""
+        region_str = ", ".join(regions)
+        
+        # Generate a basic comparison that acknowledges the data limitations
+        basic_comparison = f"""
+        # Regional Comparison Analysis for {region_str}
+        
+        **Note: This analysis is limited due to data availability issues.**
+        
+        ## Available Information:
+        
+        Based on the limited data available, crime patterns across {region_str} show some variations:
+        
+        - Each region has unique demographic and socioeconomic factors affecting crime rates
+        - Urban density, economic conditions, and policing approaches differ between regions
+        - Historical crime trends suggest regional differences in types and frequencies of incidents
+        
+        More comprehensive analysis would require additional data sources.
+        """
+        
+        return {
+            "comparison": basic_comparison,
+            "visualizations": [],
+            "status": "limited"
+        }
 
 
     def _analyze_cross_region(self, regions: List[str], 

@@ -316,7 +316,7 @@ if __name__ == "__main__":
         exit()
 
     # Extract content from URLs
-    urls = [item["url"] for item in search_response.get("results", []) 
+    urls = [item["url"] for item in search_response.get("results") 
             if "url" in item]
     extract_response = tavily_extract(urls=urls)
     

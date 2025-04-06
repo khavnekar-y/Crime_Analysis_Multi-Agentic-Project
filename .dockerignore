@@ -34,7 +34,7 @@ dist/
 *.xlsx
 test_data/
 sample_data/
-
+crime_forecast.py
 # Environment
 .env
 .venv/
