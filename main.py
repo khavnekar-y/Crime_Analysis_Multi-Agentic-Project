@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, field_validator
 import base64
@@ -18,6 +19,14 @@ from agents.llmselection import LLMSelector
 os.makedirs("reports", exist_ok=True)
 
 app = FastAPI(title="Crime Report API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for CORS
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods for CORS
+    allow_headers=["*"],  # Allow all headers for CORS
+)
 
 # Simple storage for report status
 reports = {}
@@ -91,12 +100,6 @@ class CrimeReportRequest(BaseModel):
             raise ValueError('At least one region must be selected')
         return v
     
-    @field_validator('model_type')
-    def validate_model_type(cls, v):
-        valid_models = ["Claude 3 Haiku", "Claude 3 Sonnet", "Gemini Pro"]
-        if v not in valid_models:
-            raise ValueError(f'model_type must be one of: {", ".join(valid_models)}')
-        return v
 
 class ReportResponse(BaseModel):
     """Response with report ID and status URL"""
@@ -109,6 +112,8 @@ class ReportStatus(BaseModel):
     status: str
     evaluation: Optional[Dict] = None      
     markdown_url: Optional[str] = None
+    token_usage_summary: Optional[Dict] = None
+    final_report: Optional[Dict] = None
 
 # ---------------------------
 # API Endpoints
@@ -172,7 +177,8 @@ async def generate_report(request: CrimeReportRequest):
                 "download_file": download_filename,
                 "content": processed_content,
                 "evaluation": evaluation,
-                "token_usage_summary": token_usage_summary,  
+                "token_usage_summary": token_usage_summary,
+                "final_report": final_report,
                 "model_type": request.model_type
             }
                 
@@ -190,6 +196,42 @@ async def generate_report(request: CrimeReportRequest):
     
     # Return immediately with the report ID
     return {"report_id": report_id, "status_url": f"/report_status/{report_id}"}
+
+@app.get("/report_status/{report_id}")
+async def get_report_status(report_id: str):
+    if report_id not in reports:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    report_data = dict(reports[report_id])
+    return ReportStatus(**report_data)
+
+@app.get("/report/{report_id}")
+async def get_report(report_id: str):
+    """Get the markdown report for viewing (without base64 images)"""
+    if report_id not in reports:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    if reports[report_id]["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Report not ready")
+    
+    # First check if content is stored directly in memory
+    if "content" in reports[report_id]:
+        return Response(content=reports[report_id]["content"], media_type="text/markdown")
+    
+    # Otherwise check for the file
+    if "report_file" in reports[report_id]:
+        report_path = reports[report_id]["report_file"]
+        if os.path.exists(report_path):
+            return FileResponse(report_path, media_type="text/markdown")
+    
+    # If all else fails, check for standard filenames
+    standard_path = f"{report_id}.md"
+    if os.path.exists(standard_path):
+        return FileResponse(standard_path, media_type="text/markdown")
+        
+    # If no file is found, raise an error
+    raise HTTPException(status_code=404, detail="Report file not found")
+
 
 @app.get("/forecast_code/{report_id}")
 async def get_forecast_code(report_id: str):
@@ -233,46 +275,6 @@ async def download_report(report_id: str):
     raise HTTPException(status_code=404, detail="Downloadable report file not found")
 
 
-@app.get("/report_status/{report_id}", response_model=ReportStatus)
-async def get_report_status(report_id: str):
-    """Get the status of a report"""
-    if report_id not in reports:
-        raise HTTPException(status_code=404, detail="Report not found")
-    
-    report_data = dict(reports[report_id])
-    
-    # Add markdown URL if report is completed
-    if report_data.get("status") == "completed" and "report_file" in report_data:
-        report_data["markdown_url"] = f"/report/{report_id}"
-    
-    return ReportStatus(**report_data)
-
-@app.get("/report/{report_id}")
-async def get_report(report_id: str):
-    """Get the markdown report for viewing (without base64 images)"""
-    if report_id not in reports:
-        raise HTTPException(status_code=404, detail="Report not found")
-    
-    if reports[report_id]["status"] != "completed":
-        raise HTTPException(status_code=400, detail="Report not ready")
-    
-    # First check if content is stored directly in memory
-    if "content" in reports[report_id]:
-        return Response(content=reports[report_id]["content"], media_type="text/markdown")
-    
-    # Otherwise check for the file
-    if "report_file" in reports[report_id]:
-        report_path = reports[report_id]["report_file"]
-        if os.path.exists(report_path):
-            return FileResponse(report_path, media_type="text/markdown")
-    
-    # If all else fails, check for standard filenames
-    standard_path = f"{report_id}.md"
-    if os.path.exists(standard_path):
-        return FileResponse(standard_path, media_type="text/markdown")
-        
-    # If no file is found, raise an error
-    raise HTTPException(status_code=404, detail="Report file not found")
 
 @app.get("/available_models")
 async def get_available_models():

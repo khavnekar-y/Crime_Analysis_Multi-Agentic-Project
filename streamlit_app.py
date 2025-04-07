@@ -131,7 +131,7 @@ def handle_combined_report():
         generate_report(question)
 
 def generate_report(question):
-    """Handle report generation, forecast visualization and display"""
+    """Handle report generation and update chat history"""
     with st.spinner("🔄 Generating report..."):
         try:
             # Prepare request payload
@@ -144,13 +144,23 @@ def generate_report(question):
                 "model_type": st.session_state.selected_model
             }
 
+            # Add user message to chat history first
+            st.session_state.chat_history.append({
+                "role": "user",
+                "content": question,
+                "search_type": payload["search_mode"],
+                "start_year": payload["start_year"],
+                "end_year": payload["end_year"],
+                "selected_regions": payload["selected_regions"],
+                "model": payload["model_type"]
+            })
+
             # Initiate report generation
             response = requests.post(QUERY_URL, json=payload)
             if response.status_code != 200:
                 st.error(f"❌ API Error: {response.status_code}")
                 return
 
-            # Get report ID and status URL
             data = response.json()
             report_id = data["report_id"]
             status_url = data.get("status_url", f"/report_status/{report_id}")
@@ -159,8 +169,8 @@ def generate_report(question):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            # Poll for status until completion or timeout
-            for i in range(60):  # Maximum 60 seconds wait
+            # Poll for status
+            for i in range(60):
                 status_response = requests.get(f"{API_URL}{status_url}")
                 if status_response.status_code != 200:
                     continue
@@ -174,13 +184,10 @@ def generate_report(question):
                     st.error(f"Report generation failed: {status_data.get('error', 'Unknown error')}")
                     return
                 else:
-                    progress = min(5 + i * 1.5, 95)  # Cap at 95%
+                    progress = min(5 + i * 1.5, 95)
                     progress_bar.progress(int(progress))
                     status_text.write(f"⏳ Processing report... ({int(progress)}%)")
-                
                 time.sleep(1)
-            else:
-                st.warning("⚠️ Report generation is taking longer than expected. Results will appear when ready.")
             
             # Get the completed report
             report_response = requests.get(f"{API_URL}/report/{report_id}")
@@ -188,14 +195,17 @@ def generate_report(question):
                 st.error(f"❌ Failed to retrieve report: {report_response.status_code}")
                 return
                 
-            # Display report content
             content = report_response.text
+            st.markdown(content, unsafe_allow_html=True)
             
-            # Get evaluation data
+            # Get evaluation and token usage data
             status_response = requests.get(f"{API_URL}/report_status/{report_id}")
             if status_response.status_code == 200:
                 status_data = status_response.json()
                 evaluation = status_data.get("evaluation", {})
+                token_summary = status_data.get("token_usage_summary", {})
+                
+                # Store report in session state
                 report_data = {
                     "content": content,
                     "evaluation": evaluation,
@@ -203,79 +213,61 @@ def generate_report(question):
                     "question": question,
                     "selected_regions": st.session_state["selected_cities"],
                     "model": st.session_state.selected_model,
-                    "token_usage_summary": status_data.get("token_usage_summary", {})
+                    "token_usage_summary": token_summary,
+                    "final_report": status_data.get("final_report", {}),
                 }
                 st.session_state.reports[report_id] = report_data
                 
-                # Store report in session state
-                st.session_state.reports[report_id] = {
+                # Add assistant message to chat history
+                st.session_state.chat_history.append({
+                    "role": "assistant",
                     "content": content,
+                    "report_id": report_id,
                     "evaluation": evaluation,
-                    "timestamp": datetime.now().isoformat(),
-                    "question": question,
-                    "selected_regions": st.session_state["selected_cities"],
-                    "model": st.session_state.selected_model,
-                    "token_usage_summary": status_data.get("token_usage_summary", {}) 
-                }
+                    "token_usage": token_summary
+                })
                 
-                # Process and display the markdown content
-                sections = content.split('\n')
-                current_text = []
-                
-                for line in sections:
-                    if line.startswith('!['):
-                        if current_text:
-                            st.markdown('\n'.join(current_text), unsafe_allow_html=True)
-                            current_text = []
-                        
-                        try:
-                            img_path = line.split('](')[1].split(')')[0]
-                            if img_path.startswith('./'):
-                                img_path = img_path[2:]
-                            if os.path.exists(img_path):
-                                st.image(img_path, use_column_width=True)
-                        except Exception:
-                            pass
-                    else:
-                        current_text.append(line)
-                
-                if current_text:
-                    st.markdown('\n'.join(current_text))
-                
-                
+                # Display download and visualization options
                 cols = st.columns(2)
                 with cols[0]:
                     st.download_button(
                         label="📥 Download Report",
                         data=content,
-                        file_name=f"crime_report_{datetime.fromisoformat(report_data.get('timestamp', '')).strftime('%Y%m%d_%H%M%S')}.md",
+                        file_name=f"crime_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
                         mime="text/markdown"
                     )
                 with cols[1]:
                     if st.button("Show Forecast Graph"):
-                        # Extract forecast section from the final report
                         final_report = st.session_state.reports[report_id].get("final_report", {})
+                        st.write("Final report structure:", final_report.keys())  # Debug
                         forecast_section = final_report.get("forecast", {})
+                        st.write("Forecast section structure:", forecast_section.keys())  # Debug
                         dfs_list = forecast_section.get("dfs", [])
+                        st.write("Forecast dataframes structure:", dfs_list)  # Debug
                         if dfs_list:
                             import pandas as pd
                             for i, df_data in enumerate(dfs_list):
-                                df_forecast = pd.DataFrame(df_data)
-                                if not df_forecast.empty:
-                                    st.subheader(f"Forecast Dataframe {i+1}")
-                                    st.line_chart(df_forecast)
-                                else:
-                                    st.warning(f"Forecast dataframe {i+1} is empty.")
+                                try:
+                                    import pandas as pd
+                                    df_forecast = pd.DataFrame(df_data)
+                                    if not df_forecast.empty:
+                                        st.subheader(f"Forecast Dataframe {i+1}")
+                                        st.line_chart(df_forecast)
+                                    else:
+                                        st.warning(f"Forecast dataframe {i+1} is empty.")
+                                except Exception as e:
+                                    st.error(f"Error converting dataframe {i+1}: {str(e)}")
+                                    st.write("Data structure:", df_data)
                         else:
                             st.warning("No forecast data available.")
 
-            
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
-        
-        # Clear the progress display
-        st.empty()
-        
+        finally:
+            # Clear progress displays
+            progress_bar.empty()
+            status_text.empty()
+
 def create_download_link(report_id):
     """Create a download link for base64-encoded markdown report"""
     download_url = f"{API_URL}/download_report/{report_id}"
@@ -529,7 +521,7 @@ elif page == "Judge Metrics":
         """)
         
         # Extract judge feedback - handle different possible structures
-        judge_feedback = report_data.get("judge_feedback", {})
+        judge_feedback = report_data.get("evaluation", {})
         
         # Get overall score with proper fallbacks
         score = 0
@@ -645,38 +637,35 @@ elif page == "Token Usage":
         for rep_id, rep_data in st.session_state.reports.items():
             st.subheader(f"Report Generated: {datetime.fromisoformat(rep_data.get('timestamp', '')).strftime('%Y-%m-%d %H:%M:%S')}")
             
+            # Get token usage from the report data
             token_summary = rep_data.get("token_usage_summary", {})
             if token_summary:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric("Total Tokens", f"{token_summary.get('total_tokens', 0):,}")
+                    total_tokens += token_summary.get('total_tokens', 0)
                 with col2:
                     st.metric("Total Cost", f"${token_summary.get('total_cost', 0):.4f}")
+                    total_cost += token_summary.get('total_cost', 0)
                 
                 # Display per-node breakdown
                 if node_usage := token_summary.get("by_node"):
-                    st.markdown("#### Token Usage by Component")
-                    for node, usage in node_usage.items():
-                        st.markdown(f"""
-                        **{node}**:
-                        - Tokens: {usage.get('tokens', 0):,}
-                        - Cost: ${usage.get('cost', 0):.4f}
-                        """)
-                
-                # Update totals
-                total_tokens += token_summary.get('total_tokens', 0)
-                total_cost += token_summary.get('total_cost', 0)
+                    with st.expander("🔍 Token Usage by Component"):
+                        for node, usage in node_usage.items():
+                            cols = st.columns(2)
+                            with cols[0]:
+                                st.metric(f"{node} Tokens", f"{usage.get('tokens', 0):,}")
+                            with cols[1]:
+                                st.metric(f"{node} Cost", f"${usage.get('cost', 0):.4f}")
         
         # Display overall statistics
         st.markdown("---")
-        st.subheader("Overall Statistics")
+        st.subheader("💰 Overall Usage Statistics")
         col1, col2 = st.columns(2)
         with col1:
             st.metric("Total Tokens (All Reports)", f"{total_tokens:,}")
         with col2:
             st.metric("Total Cost (All Reports)", f"${total_cost:.4f}")
-    else:
-        st.info("No reports available yet.")
 
 elif page == "About":
     st.title("About Crime Analysis Assistant")

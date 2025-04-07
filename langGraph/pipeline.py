@@ -936,9 +936,20 @@ def judge_node(state: CrimeReportState) -> Dict:
         # Merge the evaluation output into the final report
         state["final_report"]["evaluation"] = evaluation
         
-        # Update the token usage summary in the final report
-        from agents.snowflake_utils import summarize_token_usage  # Adjust the import as needed
-        state["final_report"]["token_usage_summary"] = summarize_token_usage(state)
+        if "token_usage" in state:
+            state["final_report"]["token_usage_summary"] = {
+                "total_tokens": state["token_usage"].get("total_tokens", 0),
+                "total_cost": state["token_usage"].get("total_cost", 0.0),
+                "by_node": state["token_usage"].get("by_node", {}),
+                "model_info": state["token_usage"].get("model_used", {})
+            }
+        else:
+            state["final_report"]["token_usage_summary"] = {
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "by_node": {},
+                "model_info": {}
+            }
         
         return evaluation
     except Exception as e:
@@ -954,17 +965,17 @@ def track_token_usage(state: CrimeReportState, node_name: str, input_text: str, 
     try:
         model_name = state["model_type"]
         
-        # Calculate tokens
+        
         input_tokens = llmselection.count_tokens(input_text, model_name)
         output_tokens = llmselection.count_tokens(output_text, model_name)
         total_tokens = input_tokens + output_tokens
         
-        # Get model limits and pricing
+        
         model_info = llmselection.get_token_limits(model_name)
         cost_per_1k = model_info["cost_per_1k"]
         context_window = model_info["context_window"]
         
-        # Calculate cost
+        
         cost = (total_tokens / 1000) * cost_per_1k
         
         # Initialize token tracking if not present
@@ -1021,22 +1032,6 @@ def track_token_usage(state: CrimeReportState, node_name: str, input_text: str, 
         }
 
 
-
-def generate_section_content(state: CrimeReportState, llm: Any, section_key: str, section: Dict, prompt: str) -> str:
-    """Generate content for a report section and track token usage."""
-    try:
-        content = llmselection.get_response(llm, prompt)
-        usage = track_token_usage(
-            state=state,
-            node_name=f"report_section_{section_key}",
-            input_text=prompt,
-            output_text=content
-        )
-        print(f"Generated {section['title']} content ({usage['total_tokens']} tokens)")
-        return content
-    except Exception as e:
-        print(f"Error generating {section_key} content: {str(e)}")
-        return f"Error generating content: {str(e)}"
 
 
 def embed_image_as_base64(image_path: str) -> Optional[str]:
