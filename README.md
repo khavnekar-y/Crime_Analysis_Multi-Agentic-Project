@@ -89,8 +89,8 @@ This repository implements a multi-agent research assistant integrating:
 - **Visualization:** Graphviz
 
 ## Deployed links 
-- FASTAPI  = https://fastapi-crimereport-app-84150543519.us-central1.run.app/docs
-- STREAMLIT = https://crime-report-analyzer.streamlit.app/
+- FASTAPI  = [https://fastapi-crimereport-app-84150543519.us-central1.run.app/docs](https://fastapi-crimereport-app-84150543519.us-central1.run.app)
+- STREAMLIT = [https://crime-report-analyzer.streamlit.app/](https://crime-analysis-report.streamlit.app/)
 
 # 🛠️ Environment Setup
 
