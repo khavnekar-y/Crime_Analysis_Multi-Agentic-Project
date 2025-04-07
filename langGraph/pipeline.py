@@ -655,24 +655,17 @@ def report_organization_node(state: CrimeReportState) -> Dict:
             
     
         
-        # Current analysis from Snowflake output
         if "snowflake_output" in state and state["snowflake_output"].get("status") == "success":
-            analysis = state["snowflake_output"].get("analysis", "")
-            report_sections["current_analysis"]["content"] = analysis
-            
-            # Add visualizations
+            # Current analysis
             viz_paths = state["snowflake_output"].get("visualizations", {}).get("paths", {})
             if all_incidents_path := viz_paths.get("all_incidents_trend"):
                 report_sections["current_analysis"]["visualizations"].append(all_incidents_path)
-        
-        # Regional comparison from comparison output
-        if "comparison_output" in state:
-            comparison = state["comparison_output"].get("comparison")
-            report_sections["regional_comparison"]["content"] = comparison
             
-            # Add comparison visualizations if any
-            comp_viz = state["comparison_output"].get("visualizations", {})
-            report_sections["regional_comparison"]["visualizations"] = list(comp_viz.values())
+            # Regional comparison
+            comp_paths = state["snowflake_output"].get("visualizations", {}).get("comparison_paths", {})
+            # Add them to the "regional_comparison" section
+            for _, path in comp_paths.items():
+                report_sections["regional_comparison"]["visualizations"].append(path)
 
         
         # Safety assessment from safety output
@@ -853,6 +846,12 @@ def final_report_node(state: CrimeReportState) -> Dict:
         report_sections = state.get("report_sections", {})
         visualizations = state.get("visualizations", {})
         contextual_images = state.get("contextual_images", {})
+
+        token_usage = state.get("token_usage", {
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "by_node": {}
+        })
         
         # Log once
         section_titles = [section.get("title") for section in report_sections.values()]
@@ -867,7 +866,13 @@ def final_report_node(state: CrimeReportState) -> Dict:
             "sections": sorted([section for section in report_sections.values()], 
                              key=lambda x: x.get("order", 999)),
             "visualizations": list(visualizations.values()) if visualizations else [],
-            "contextual_images": list(contextual_images.values()) if contextual_images else []
+            "contextual_images": list(contextual_images.values()) if contextual_images else [],
+            "token_usage_summary": {  # Add token usage summary
+                "total_tokens": token_usage.get("total_tokens", 0),
+                "total_cost": token_usage.get("total_cost", 0),
+                "by_node": token_usage.get("by_node", {}),
+                "model_info": token_usage.get("model_used", {})
+            }
         }
         
         # Generate cover
@@ -895,64 +900,50 @@ def final_report_node(state: CrimeReportState) -> Dict:
         }}
             
 def judge_node(state: CrimeReportState) -> Dict:
-    """Evaluate report quality using JudgeAgent with memory."""
+    """Evaluate report quality using JudgeAgent and merge the evaluation and token usage into the final report."""
     try:
         print("\n⚖️ Evaluating report quality...")
-        
-        # Get or create judge agent
+        # Initialize the Judge Agent if not already done
         if not hasattr(judge_node, 'agent'):
-            model_type = state["model_type"]
-            judge_node.agent = JudgeAgent(model_type=model_type)
-            print(f"Judge agent initialized with model: {model_type}")
+            judge_node.agent = JudgeAgent(model_type=state["model_type"])
+            print(f"Judge agent initialized with model: {state['model_type']}")
+        
+        # Ensure that a final report exists in state
         if "final_report" not in state:
             raise ValueError("Final report not found in state")
         
-        # Create evaluation context
+        # Create an evaluation context from the final report and input parameters
         evaluation_context = {
             'report': state["final_report"],
             'regions': state["selected_regions"],
             'time_period': f"{state.get('start_year', 'all history')} to {state.get('end_year', 'present')}"
         }
         
+        # Evaluate the report using the Judge Agent
         evaluation = judge_node.agent.evaluate(evaluation_context)
         if not evaluation:
-            raise ValueError("Evaluation failed or returned no results")
+            raise ValueError("Evaluation returned no results")
         
-        # Make sure feedback_history exists
-        if not hasattr(judge_node.agent, 'feedback_history'):
-            judge_node.agent.feedback_history = []
-        
+        # Track token usage for this evaluation step
         usage = track_token_usage(
             state=state,
             node_name="report_evaluation",
             input_text=str(evaluation_context),
             output_text=str(evaluation)
         )
-        tokens_used = usage.get("tokens", 0)
-        print(f"✅ Report evaluation complete with {tokens_used} tokens and {usage['cost']}$ cost")
-        print(f"📝 Evaluation feedback: {evaluation.get('feedback', 'No feedback provided')}")
-        print(f"📝 Stored {len(judge_node.agent.feedback_history)} previous evaluations")
+        print(f"✅ Report evaluation complete with {usage.get('total_tokens', 0)} tokens and cost ${usage.get('cost', 0):.4f}")
         
-        evaluation_data = {
-            "judge_feedback": evaluation,
-            "quality_scores": evaluation.get("scores", {}),
-            "improvement_suggestions": evaluation.get("improvement_suggestions", []),
-            "feedback_history": judge_node.agent.feedback_history[-5:] 
-        }
+        # Merge the evaluation output into the final report
+        state["final_report"]["evaluation"] = evaluation
         
-        # Include evaluation in the final report for storage
-        if "final_report" in state:
-            state["final_report"]["evaluation"] = evaluation_data
+        # Update the token usage summary in the final report
+        from agents.snowflake_utils import summarize_token_usage  # Adjust the import as needed
+        state["final_report"]["token_usage_summary"] = summarize_token_usage(state)
         
-        return evaluation_data
-        
+        return evaluation
     except Exception as e:
         print(f"❌ Report evaluation error: {str(e)}")
-        traceback.print_exc()
-        return {
-            "judge_feedback": {"error": str(e)},
-            "quality_scores": {"overall": 5}
-        }
+        return {"judge_feedback": {"error": str(e)}}
         
     
 ###############################################################################

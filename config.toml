@@ -1,1 +1,1 @@
-fastapi_url = "https://fastapi-crimereport-app-84150543519.us-central1.run.app"
+fastapi_url = "http://localhost:8080/"

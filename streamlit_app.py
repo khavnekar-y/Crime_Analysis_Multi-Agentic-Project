@@ -77,25 +77,40 @@ def handle_combined_report():
     st.title("Crime Analysis Assistant")
     st.subheader("💬 Research History")
 
-    # # Show chat history
-    # with st.container():
-    #     for message in st.session_state.chat_history:
-    #         if message["role"] == "user":
-    #             periods_text = "All Years" if message.get("search_type") == "all_years" else f"{message.get('start_year', '')} - {message.get('end_year', '')}"
-    #             regions_text = ", ".join(message.get("selected_regions", []))
-    #             st.markdown(f"""
-    #                 <div class='user-message'>
-    #                     <div class='metadata'>📅 {periods_text}<br>🌎 Regions: {regions_text}<br>🤖 Model: {message.get("model", "")}</div>
-    #                     <div>🔍 {message['content']}</div>
-    #                 </div>
-    #             """, unsafe_allow_html=True)
-    #         else:
-    #             st.markdown(f"""
-    #                 <div class='assistant-message'>
-    #                     <div class='metadata'>🤖 Crime Analysis Assistant</div>
-    #                     <div>{message['content']}</div>
-    #                 </div>
-    #             """, unsafe_allow_html=True)
+    # Show chat history
+    with st.container():
+        for i, message in enumerate(st.session_state.chat_history):
+            if message["role"] == "user":
+                periods_text = "All Years" if message.get("search_type") == "all_years" else f"{message.get('start_year', '')} - {message.get('end_year', '')}"
+                regions_text = ", ".join(message.get("selected_regions", []))
+                
+                # Create an expander for each message
+                with st.expander(f"💬 Query #{i+1}: {message['content'][:50]}...", expanded=False):
+                    st.markdown(f"""
+                        <div class='user-message'>
+                            <div class='metadata'>📅 {periods_text}<br>🌎 Regions: {regions_text}<br>🤖 Model: {message.get("model", "")}</div>
+                            <div>🔍 {message['content']}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # If there's a corresponding assistant message, show it in the same expander
+                    if i + 1 < len(st.session_state.chat_history) and st.session_state.chat_history[i + 1]["role"] == "assistant":
+                        assistant_message = st.session_state.chat_history[i + 1]
+                        st.markdown(f"""
+                            <div class='assistant-message'>
+                                <div class='metadata'>🤖 Crime Analysis Assistant</div>
+                                <div>{assistant_message['content']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Add download button for each report
+                        if "report_markdown" in assistant_message:
+                            st.download_button(
+                                label="📥 Download Report",
+                                data=assistant_message["report_markdown"],
+                                file_name=f"crime_report_{i}.md",
+                                mime="text/markdown"
+                            )
 
     # Check if we have selected cities
     if "selected_cities" not in st.session_state or not st.session_state["selected_cities"]:
@@ -181,6 +196,16 @@ def generate_report(question):
             if status_response.status_code == 200:
                 status_data = status_response.json()
                 evaluation = status_data.get("evaluation", {})
+                report_data = {
+                    "content": content,
+                    "evaluation": evaluation,
+                    "timestamp": datetime.now().isoformat(),
+                    "question": question,
+                    "selected_regions": st.session_state["selected_cities"],
+                    "model": st.session_state.selected_model,
+                    "token_usage_summary": status_data.get("token_usage_summary", {})
+                }
+                st.session_state.reports[report_id] = report_data
                 
                 # Store report in session state
                 st.session_state.reports[report_id] = {
@@ -189,7 +214,8 @@ def generate_report(question):
                     "timestamp": datetime.now().isoformat(),
                     "question": question,
                     "selected_regions": st.session_state["selected_cities"],
-                    "model": st.session_state.selected_model
+                    "model": st.session_state.selected_model,
+                    "token_usage_summary": status_data.get("token_usage_summary", {}) 
                 }
                 
                 # Process and display the markdown content
@@ -199,7 +225,7 @@ def generate_report(question):
                 for line in sections:
                     if line.startswith('!['):
                         if current_text:
-                            st.markdown('\n'.join(current_text))
+                            st.markdown('\n'.join(current_text), unsafe_allow_html=True)
                             current_text = []
                         
                         try:
@@ -578,7 +604,7 @@ elif page == "Judge Metrics":
         
         # Show report content in expander
         with st.expander("View Report Content", expanded=False):
-            st.markdown(report_data.get("content", ""))
+            st.markdown(report_data.get("content", ""), unsafe_allow_html=True)
             report_md = create_downloadable_report(report_data)
             st.download_button(
                 label="📥 Download Report",
@@ -613,16 +639,44 @@ elif page == "Judge Metrics":
 elif page == "Token Usage":
     st.title("Token Usage Summary")
     if st.session_state.reports:
+        total_tokens = 0
+        total_cost = 0
+        
         for rep_id, rep_data in st.session_state.reports.items():
-            st.subheader(f"Report ID: {rep_id}")
-            token_summary = rep_data.get("token_usage_summary")
+            st.subheader(f"Report Generated: {datetime.fromisoformat(rep_data.get('timestamp', '')).strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            token_summary = rep_data.get("token_usage_summary", {})
             if token_summary:
-                st.json(token_summary)
-            else:
-                st.info("No token usage data available for this report.")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total Tokens", f"{token_summary.get('total_tokens', 0):,}")
+                with col2:
+                    st.metric("Total Cost", f"${token_summary.get('total_cost', 0):.4f}")
+                
+                # Display per-node breakdown
+                if node_usage := token_summary.get("by_node"):
+                    st.markdown("#### Token Usage by Component")
+                    for node, usage in node_usage.items():
+                        st.markdown(f"""
+                        **{node}**:
+                        - Tokens: {usage.get('tokens', 0):,}
+                        - Cost: ${usage.get('cost', 0):.4f}
+                        """)
+                
+                # Update totals
+                total_tokens += token_summary.get('total_tokens', 0)
+                total_cost += token_summary.get('total_cost', 0)
+        
+        # Display overall statistics
+        st.markdown("---")
+        st.subheader("Overall Statistics")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Tokens (All Reports)", f"{total_tokens:,}")
+        with col2:
+            st.metric("Total Cost (All Reports)", f"${total_cost:.4f}")
     else:
         st.info("No reports available yet.")
-
 
 elif page == "About":
     st.title("About Crime Analysis Assistant")

@@ -228,3 +228,14 @@ a[download]:hover {
     color: #E3F2FD !important;
     text-decoration: none !important;
 }
+.streamlit-expanderHeader {
+    background-color: #1e1e1e;
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+
+.streamlit-expanderContent {
+    background-color: #2d2d2d;
+    border-radius: 0 0 5px 5px;
+    padding: 10px;
+}

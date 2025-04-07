@@ -143,14 +143,12 @@ async def generate_report(request: CrimeReportRequest):
             })
             
             final_report = result.get("final_report", {})
-            
-            # Extract forecast code
-            forecast_code = final_report.get("forecast_output", {}).get("forecast_code")
-            forecast_code_path = final_report.get("forecast_output", {}).get("forecast_code_path")
-            if forecast_code and not forecast_code_path:
-                forecast_code_path = f"{report_id}_forecast_code.py"
-                with open(forecast_code_path, "w") as f:
-                    f.write(forecast_code)
+            token_usage_summary = final_report.get("token_usage_summary", {
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "by_node": {},
+            "model_info": {}
+            })
             
             # Generate markdown using pipeline's function
             md_filename = f"{report_id}.md"
@@ -172,9 +170,10 @@ async def generate_report(request: CrimeReportRequest):
                 "status": "completed",
                 "report_file": md_filename,
                 "download_file": download_filename,
+                "content": processed_content,
                 "evaluation": evaluation,
-                "forecast_code_path": forecast_code_path,
-                "forecast_code": forecast_code
+                "token_usage_summary": token_usage_summary,  
+                "model_type": request.model_type
             }
                 
         except Exception as e:
@@ -207,14 +206,7 @@ async def get_forecast_code(report_id: str):
             media_type="text/plain",
             headers={"Content-Disposition": f"attachment; filename=crime_forecast_{report_id}.py"}
         )
-    elif "forecast_code_path" in reports[report_id]:
-        path = reports[report_id]["forecast_code_path"]
-        if os.path.exists(path):
-            return FileResponse(
-                path,
-                media_type="text/plain",
-                filename=f"crime_forecast_{report_id}.py"
-            )
+    
     
     raise HTTPException(status_code=404, detail="Forecast code not found")
 
@@ -290,3 +282,4 @@ async def get_available_models():
     return {
         "models": list(available_models.keys())
     }    
+
