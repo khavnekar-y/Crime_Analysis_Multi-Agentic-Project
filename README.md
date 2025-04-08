@@ -15,7 +15,8 @@ This repository implements a multi-agent research assistant integrating:
 ![alt text](diagram-export-4-1-2025-12_15_36-AM.png)
 
 ---
-
+Overview
+![alt text](crime_analysis_langgraph.png)
 
 ---
 
