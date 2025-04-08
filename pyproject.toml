@@ -8,8 +8,6 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
 dependencies = [
-    "selenium (>=4.0.0)",
-    "webdriver-manager (>=3.8.0)",
     "streamlit (>=1.43.2,<2.0.0)",
     "requests (>=2.32.3,<3.0.0)",
     "uvicorn (>=0.34.0,<0.35.0)",
@@ -17,7 +15,6 @@ dependencies = [
     "python-multipart (>=0.0.20,<0.0.21)",
     "pydantic (>=2.10.6,<3.0.0)",
     "asyncio (>=3.4.3,<4.0.0)",
-    "chunking-evaluation @ git+https://github.com/brandonstarxel/chunking_evaluation.git",
     "matplotlib (>=3.10.1,<4.0.0)",
     "tiktoken (>=0.9.0,<0.10.0)",
     "scikit-learn (>=1.6.1,<2.0.0)",
@@ -43,12 +40,16 @@ dependencies = [
     "sqlalchemy (>=2.0.40,<3.0.0)",
     "snowflake-sqlalchemy (>=1.7.3,<2.0.0)",
     "langchain-groq (>=0.3.1,<0.4.0)",
-    "langchain-google-genai (>=2.1.2,<3.0.0)",
     "mistralai (>=1.6.0,<2.0.0)",
     "fpdf (>=1.7.2,<2.0.0)",
     "openpyxl (>=3.1.5,<4.0.0)",
     "tavily-python (>=0.5.3,<0.6.0)",
-    "statsmodels (>=0.14.4,<0.15.0)"
+    "google-cloud-aiplatform (>=1.87.0,<2.0.0)",
+    "pillow (>=11.1.0,<12.0.0)",
+    "langchain-google-genai (==2.0.0)",
+    "xai-grok-sdk (>=0.0.12,<0.0.13)",
+    "streamlit-folium (>=0.24.0,<0.25.0)",
+    "folium (>=0.19.5,<0.20.0)",
 ]
 
 

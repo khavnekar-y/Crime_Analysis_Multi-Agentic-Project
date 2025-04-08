@@ -87,6 +87,9 @@ This repository implements a multi-agent research assistant integrating:
 - **Database:** Snowflake connection
 - **LLM:** Anthropic Claude 3
 - **Visualization:** Graphviz
+## Deployed links 
+- FASTAPI  = https://fastapi-crimereport-app-84150543519.us-central1.run.app/docs
+- STREAMLIT = https://crime-report-analyzer.streamlit.app/
 
 ## Deployed links 
 - FASTAPI  = [https://fastapi-crimereport-app-84150543519.us-central1.run.app/docs](https://fastapi-crimereport-app-84150543519.us-central1.run.app)

@@ -2,15 +2,19 @@ import logging
 from langchain_core.tools import tool
 import os
 from sentence_transformers import SentenceTransformer, CrossEncoder
-from typing import Dict, Any, Union, Optional
+from typing import Dict, Any, Union, Optional, List
 from pinecone import Pinecone
 from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain.agents import AgentType, initialize_agent
+from langchain.memory import ConversationBufferMemory
+from langchain.tools import Tool
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import json
 import boto3
+import traceback
 
 # Initialize environment and configurations
 load_dotenv(override=True)
@@ -27,6 +31,9 @@ encoder = SentenceTransformer('all-MiniLM-L6-v2')
 cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index = pc.Index(os.getenv("PINECONE_INDEX_NAME", "crime-reports"))
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the LLMSelector from your llmselection file
 from agents.llmselection import LLMSelector as llmselection
@@ -35,44 +42,129 @@ class SearchCrimeDataInput(BaseModel):
     tool_input: Dict[str, Any] = Field(..., description="The input parameters for the search")
 
 class RAGAgent:
-    def __init__(self, model_name: str = "claude-3-haiku-20240307"):
-        # Initialize the LLM using the LLMSelector
-        self.initialize_agent(model_name)
-        self.prompt = PromptTemplate.from_template("""
-            You are a crime analysis expert. Based on the provided data, create a comprehensive analysis.
-            
-            SEARCH RESULTS:
-            {context}
-            
-            QUERY:
-            {query}
-            
-            Provide a detailed report with:
-            1. Executive Summary
-            2. Incident Details
-            3. Evidence & Leads
-            4. Context & Implications
-            5. Recommendations
-            
-            ANALYSIS:
-        """)
+    def __init__(self, model_name: Optional[str] = None):
+        """Initialize the RAG agent with the specified model."""
+        # Use passed model or default to Claude 3 Haiku
+        self.model_name = model_name
+        print(f"Initializing RAG Agent with model: {self.model_name}")
+        
+        self.llm = llmselection.get_llm(self.model_name)
+        
+        # Define the analysis prompt
+        self.analysis_prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are an expert crime analyst. Analyze the provided crime data to identify patterns, 
+                         trends, and insights that would be valuable for law enforcement and public safety officials.
+                         Your analysis should be comprehensive, focusing on:
+                         - Key patterns in crime types and frequency
+                         - Temporal trends (seasonal, yearly changes)
+                         - Geographic distribution and hotspots
+                         - Correlation with socioeconomic or other factors if available
+                         - Potential causative factors
+                         - Recommendations for intervention and prevention"""),
+            ("user", """Please analyze the following crime data based on this query: {query}
+                        
+                        CRIME DATA:
+                        {context}
+                        
+                        Provide a structured, insightful analysis with actionable recommendations.""")
+        ])
+        
+        # Create the direct analysis chain
+        self.analysis_chain = self.analysis_prompt | self.llm | StrOutputParser()
     
-    def initialize_agent(self, model_name: str):
-        """
-        Initialize the LLM by retrieving it from the LLMSelector.
-        This ensures that the correct model is used.
-        """
-        self.llm = llmselection.get_llm(model_name)
+    def _analyze_data(self, query: str, context: str) -> str:
+        """Internal method to analyze crime data using LLM."""
+        try:
+            if not context or len(context.strip()) < 100:
+                return "Insufficient crime data to analyze."
+                
+            # Use the analysis chain to process the data
+            return self.analysis_chain.invoke({
+                "query": query, 
+                "context": context[:5000]  # Limit context to avoid token limits
+            })
+        except Exception as e:
+            logging.error(f"Error analyzing data: {str(e)}")
+            traceback.print_exc()
+            return f"Error analyzing crime data: {str(e)}"
     
-    def process(self, query: str, context: str) -> str:
+    def process(self, query: str, search_mode: str = "all_years", 
+                start_year: Optional[int] = None, end_year: Optional[int] = None, 
+                selected_regions: Optional[List[str]] = None, 
+                context: Optional[str] = None) -> Dict[str, Any]:
         """
-        Process the search results and return an analysis.
-        If no quality context is provided, a prompt to refine the search is returned.
+        Process a crime data query using RAG techniques.
+        
+        Args:
+            query: User's query about crime data
+            search_mode: "all_years" or "specific_range"
+            start_year: Start year for specific range
+            end_year: End year for specific range
+            selected_regions: List of regions to include
+            context: Optional pre-retrieved context
+            
+        Returns:
+            Dictionary with insights and metadata
         """
-        if not context or context.startswith("No results found"):
-            return "No relevant information found. Please refine your search."
-        chain = self.prompt | self.llm | StrOutputParser()
-        return chain.invoke({"query": query, "context": context})
+        try:
+            # If context is already provided, use it directly
+            if context:
+                analysis = self._analyze_data(query=query, context=context)
+                return {
+                    "insights": analysis,
+                    "analysis_type": "direct",
+                    "model_used": self.model_name,
+                    "status": "success"
+                }
+                
+            # Otherwise, search for relevant data first
+            search_input = {
+                "query": query,
+                "search_mode": search_mode,
+                "start_year": start_year,
+                "end_year": end_year,
+                "model_type": self.model_name
+            }
+            
+            # If regions are provided, include them
+            if selected_regions:
+                search_input["regions"] = selected_regions
+                
+            # Execute search to retrieve relevant crime data
+            search_result = search_crime_data({"tool_input": search_input})
+            
+            # Handle string results (usually error messages)
+            if isinstance(search_result, str):
+                return {
+                    "error": search_result,
+                    "insights": "Failed to retrieve relevant crime data.",
+                    "status": "failed"
+                }
+                
+            # Extract the text context from search results
+            formatted_context = search_result.get("raw_contexts", "No relevant crime data found.")
+            
+            # Analyze the context
+            analysis = self._analyze_data(query=query, context=formatted_context)
+            
+            # Return comprehensive results
+            return {
+                "insights": analysis,
+                "metadata": search_result.get("metadata", {}),
+                "analysis_type": "search_and_analyze",
+                "model_used": self.model_name,
+                "status": "success",
+                "raw_contexts": formatted_context[:1000] + "..." if len(formatted_context) > 1000 else formatted_context
+            }
+                
+        except Exception as e:
+            logging.error(f"RAG Agent processing error: {str(e)}")
+            traceback.print_exc()
+            return {
+                "error": str(e),
+                "insights": f"Error processing query: {str(e)}",
+                "status": "failed"
+            }
 
 def get_chunk_from_s3(chunk_s3_path: str, chunk_index: int, s3_bucket: str) -> str:
     """Retrieve specific chunk data from S3 with improved error handling."""
@@ -148,12 +240,19 @@ def format_results(matches: list) -> str:
 def search_crime_data(tool_input: Dict[str, Any]) -> Union[str, Dict]:
     """Search crime report data with improved retrieval and ranking."""
     try:
+        # Extract query parameters from the tool input
+        if isinstance(tool_input, dict) and "tool_input" in tool_input:
+            input_params = tool_input["tool_input"]
+        else:
+            input_params = tool_input
+            
         # Extract query parameters
-        query = tool_input.get("query")
-        search_mode = tool_input.get("search_mode", "all_years")
-        start_year = tool_input.get("start_year")
-        end_year = tool_input.get("end_year")
-        model_type = tool_input.get("model_type", "claude-3-haiku-20240307")
+        query = input_params.get("query")
+        search_mode = input_params.get("search_mode", "all_years")
+        start_year = input_params.get("start_year")
+        end_year = input_params.get("end_year")
+        model_type = input_params.get("model_type")
+        regions = input_params.get("regions", [])
         
         if not query:
             return "Error: Query is required"
@@ -199,24 +298,26 @@ def search_crime_data(tool_input: Dict[str, Any]) -> Union[str, Dict]:
         # Format results using improved chunk retrieval
         formatted_contexts = format_results(reranked_results)
         
-        # Use RAG agent with the selected model to process the results
-        agent = RAGAgent(model_name=model_type)
-        insights = agent.process(query, formatted_contexts)
-        
+        if not model_type:
+            # Default to a reasonable model if none specified
+            model_type = "Claude 3 Haiku"
+            
+        # Return the raw contexts and metadata
         return {
             "raw_contexts": formatted_contexts,
-            "insights": insights,
             "metadata": {
                 "query": query,
                 "search_mode": search_mode,
                 "time_range": f"{min(years_range)}-{max(years_range)}",
                 "timestamp": SYSTEM_CONFIG["CURRENT_UTC"],
                 "user": SYSTEM_CONFIG["CURRENT_USER"],
-                "result_count": len(reranked_results)
+                "result_count": len(reranked_results),
+                "regions": regions
             }
         }
     except Exception as e:
         logging.error(f"Search failed: {e}")
+        traceback.print_exc()
         return f"Error performing search: {str(e)}"
 
 # Test the tool if run directly
@@ -235,15 +336,31 @@ if __name__ == "__main__":
     for i, query in enumerate(test_queries, 1):
         print(f"\nTest {i}: {query['tool_input']['search_mode']}")
         try:
+            # Get search results
             result = search_crime_data.invoke(query)
             if isinstance(result, dict):
-                print(f"Success: Found {result['metadata']['result_count']} results")
+                print(f"Success: Found {result.get('metadata', {}).get('result_count', 0)} results")
+                
+                # Create RAG agent and process the results using direct analysis
+                rag_agent = RAGAgent("Claude 3 Haiku")
+                processed_result = rag_agent.process(
+                    query=query['tool_input']['query'],
+                    context=result.get('raw_contexts'),
+                    search_mode=query['tool_input']['search_mode'],
+                    start_year=query['tool_input'].get('start_year'),
+                    end_year=query['tool_input'].get('end_year')
+                )
+                
+                # Save to file
                 filename = f"crime_report_{query['tool_input']['search_mode']}.json"
                 with open(filename, 'w', encoding='utf-8') as f:
-                    json.dump(result, f, indent=2)
+                    json.dump(processed_result, f, indent=2)
                 print(f"Results saved to {filename}")
-                print(f"Insights: {result['insights']}")
+                
+                # Now insights should be available
+                print(f"Insights preview: {processed_result.get('insights', 'No insights')}...")
             else:
                 print(f"Error: {result}")
         except Exception as e:
             print(f"Error processing query: {str(e)}")
+            traceback.print_exc()
