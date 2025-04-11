@@ -136,7 +136,7 @@ streamlit run streamlit_app.py --server.port 8501
 
 make fastapibuild
 make streamlitbuild
-DEMO : https://northeastern-my.sharepoint.com/:v:/g/personal/mate_r_northeastern_edu/Efem9GpbHaBBpiGy6ZTCAioB8YUAO5CoZuu5V5ygPOXA4w?e=pVv6lP&nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJTdHJlYW1XZWJBcHAiLCJyZWZlcnJhbFZpZXciOiJTaGFyZURpYWxvZy1MaW5rIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXcifX0%3D
+
 
 ## Run Containers
 
