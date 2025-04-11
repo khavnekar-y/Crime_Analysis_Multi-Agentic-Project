@@ -92,7 +92,7 @@ Overview
 ## Deployed links 
 - FASTAPI  = https://fastapi-crimereport-app-84150543519.us-central1.run.app/docs
 - STREAMLIT = https://crime-report-analyzer.streamlit.app/
--DEMO: DEMO : https://northeastern-my.sharepoint.com/:v:/g/personal/mate_r_northeastern_edu/Efem9GpbHaBBpiGy6ZTCAioB8YUAO5CoZuu5V5ygPOXA4w?e=pVv6lP&nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJTdHJlYW1XZWJBcHAiLCJyZWZlcnJhbFZpZXciOiJTaGFyZURpYWxvZy1MaW5rIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXcifX0%3D
+  
 ## Deployed links 
 - FASTAPI  = [https://fastapi-crimereport-app-84150543519.us-central1.run.app/docs](https://fastapi-crimereport-app-84150543519.us-central1.run.app)
 - STREAMLIT = [https://crime-report-analyzer.streamlit.app/](https://crime-analysis-report.streamlit.app/)
